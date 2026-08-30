@@ -6,7 +6,8 @@ Follow these steps exactly.
 ## What you need from your human first
 1. **The upload token** — they got it from the group chat. It starts with `github_pat_`.
 2. **Their game** — one self-contained HTML file (everything inline: CSS, JS, no external files).
-3. **A title, their name, and this round's category.**
+3. **A title and their player name.** The current round's category is at
+   https://stealpro101.github.io/claude-hub/round.json — fetch it and use that as the category.
 
 ## Rules (important)
 - Pick a folder name (slug) for the game: lowercase letters, numbers and dashes only, e.g. `zombie-golf`.
@@ -32,7 +33,22 @@ Create `/tmp/claude-hub/games/my-game/info.json`:
 {
   "title": "My Awesome Game",
   "author": "TheirName",
+  "authorSlug": "theirname",
   "category": "this-rounds-category"
+}
+```
+
+(`authorSlug` = their player name lowercased, spaces/symbols → dashes. It links the game to their account page.)
+
+**Also give them an account** (skip if `players/<authorSlug>.json` already exists in the repo):
+create `players/<authorSlug>.json` — ask them to pick an emoji avatar and a one-line bio:
+
+```json
+{
+  "name": "TheirName",
+  "emoji": "🔥",
+  "bio": "one line of trash talk",
+  "created": "2026-08-30"
 }
 ```
 
@@ -40,7 +56,7 @@ Then:
 
 ```bash
 cd /tmp/claude-hub
-git add games/my-game
+git add games/my-game players
 git -c user.name="TheirName" -c user.email="hub@example.com" commit -m "Add my-game"
 git push
 ```

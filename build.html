@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Build Mode — Claude Hub</title>
+<link rel="stylesheet" href="assets/hub.css">
+</head>
+<body>
+<div class="wrap">
+  <h1 class="logo">BUILD MODE</h1>
+  <div class="tag">▸ make it · test it · ship it ◂</div>
+  <div id="nav"></div>
+
+  <div class="banner" id="banner" style="display:none">
+    <span class="rd" id="bRound"></span>
+    <span class="cat" id="bCat"></span>
+    <span class="note" id="bNote"></span>
+  </div>
+
+  <div class="panel" id="acctPanel">
+    <h2>1 · WHO ARE YOU?</h2>
+    <div id="acctKnown" style="display:none" class="rowflex">
+      <div class="pav" id="meAv" style="font-size:2.6rem"></div>
+      <div style="flex:1">
+        <div style="font-weight:800" id="meName"></div>
+        <div class="mini">that's you — everything you ship gets credited here</div>
+      </div>
+      <button class="btn alt" onclick="switchAcct()">switch / new</button>
+    </div>
+    <div id="acctForm">
+      <div class="rowflex" id="pickRow" style="display:none"></div>
+      <label>Your player name</label>
+      <input id="aName" placeholder="e.g. CollinTheDestroyer" maxlength="24">
+      <label>Pick your avatar</label>
+      <div class="emoji-row" id="emojiRow"></div>
+      <label>Bio (optional trash talk)</label>
+      <input id="aBio" placeholder="undefeated. don't even try." maxlength="80">
+      <label>Crew token (from the group chat — saved on this device)</label>
+      <input id="aToken" type="password" placeholder="github_pat_...">
+      <button class="btn" style="margin-top:16px" id="aGo">CREATE MY ACCOUNT</button>
+      <div class="msg" id="aMsg"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>2 · GET YOUR CLAUDE BUILDING</h2>
+    <div class="mini">Copy this and paste it to your Claude. When the game's done, come back here to test and ship it.</div>
+    <textarea class="code" id="promptBox" rows="7" readonly></textarea>
+    <button class="btn alt" style="margin-top:10px" onclick="copyPrompt(this)">📋 COPY PROMPT</button>
+  </div>
+
+  <div class="panel">
+    <h2>3 · TEST YOUR GAME</h2>
+    <div class="mini">Drop the HTML file your Claude made (or paste the code below) and play it right here before shipping.</div>
+    <div class="drop" id="drop">Drop your game's <b>index.html</b> here — or click to pick it</div>
+    <input type="file" id="file" accept=".html,.htm" hidden>
+    <label>…or paste the code</label>
+    <textarea class="code" id="codeBox" rows="5" placeholder="&lt;!DOCTYPE html&gt; ..."></textarea>
+    <button class="btn alt" style="margin-top:10px" id="testBtn">▶ RUN IT</button>
+    <iframe class="preview-frame" id="frame" style="display:none"></iframe>
+  </div>
+
+  <div class="panel">
+    <h2>4 · SHIP IT TO THE ARCADE</h2>
+    <label>Game title</label>
+    <input id="gTitle" placeholder="Zombie Golf" maxlength="40">
+    <label>Category</label>
+    <input id="gCat" maxlength="30">
+    <button class="btn" style="margin-top:16px" id="shipBtn">🚀 SHIP IT</button>
+    <div class="msg" id="shipMsg"></div>
+  </div>
+
+  <footer><a href="./">← back to the arcade</a></footer>
+</div>
+
+<script src="assets/hub.js"></script>
+<script>
+renderNav("build");
+const $ = id => document.getElementById(id);
+const EMOJIS = ["😎","👾","🤖","🐍","🦖","🐲","🦊","🐸","👑","💀","⚡","🔥","🍕","🚀","🛸","🤡"];
+let myEmoji = EMOJIS[0], round = {round:1, category:"freestyle", note:""}, players = [];
+
+loadRound().then(r=>{
+  round = r;
+  $("bRound").textContent = "ROUND " + r.round;
+  $("bCat").textContent = String(r.category||"").toUpperCase();
+  $("bNote").textContent = r.note || "";
+  $("banner").style.display = "";
+  $("gCat").value = r.category || "";
+  fillPrompt();
+});
+
+const erow = $("emojiRow");
+EMOJIS.forEach((e,i)=>{
+  const b = document.createElement("button");
+  b.textContent = e;
+  if(i===0) b.classList.add("on");
+  b.onclick = ()=>{ myEmoji = e; erow.querySelectorAll("button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); };
+  erow.appendChild(b);
+});
+
+$("aToken").value = lsGet("hubToken") || "";
+
+function fillPrompt(){
+  $("promptBox").value =
+`Make me a game! This round's category is "${round.category}". Rules:
+- ONE self-contained HTML file (all CSS and JS inline, no external files or libraries)
+- works with keyboard AND touch if possible
+- has a title, a score or win condition, and a restart
+When you're done, save it as game.html and give it to me — I'll test and upload it myself at the hub. Make it AWESOME.`;
+}
+function copyPrompt(btn){
+  navigator.clipboard.writeText($("promptBox").value).then(()=>{ btn.textContent="✔ COPIED"; setTimeout(()=>btn.textContent="📋 COPY PROMPT",1500); })
+  .catch(()=>{ $("promptBox").select(); document.execCommand("copy"); });
+}
+
+async function initAcct(){
+  players = await loadPlayers().catch(()=>[]);
+  const me = whoAmI();
+  const p = players.find(x=>x.slug===me);
+  if(p){
+    $("acctKnown").style.display = "";
+    $("acctForm").style.display = "none";
+    $("meAv").textContent = p.emoji;
+    $("meName").textContent = p.name;
+  } else if(players.length){
+    const row = $("pickRow");
+    row.style.display = "";
+    row.innerHTML = `<span class="mini">Already got an account? Click it:</span>`;
+    for(const pl of players){
+      const b = document.createElement("button");
+      b.className = "btn alt";
+      b.textContent = `${pl.emoji} ${pl.name}`;
+      b.onclick = ()=>{ setWhoAmI(pl.slug); initAcct(); };
+      row.appendChild(b);
+    }
+  }
+}
+function switchAcct(){
+  setWhoAmI("");
+  $("acctKnown").style.display = "none";
+  $("acctForm").style.display = "";
+  initAcct();
+}
+
+$("aGo").onclick = async ()=>{
+  const name = $("aName").value.trim(), token = $("aToken").value.trim(), msg = $("aMsg");
+  msg.className = "msg";
+  if(!name){ msg.className="msg bad"; msg.textContent="Pick a name first!"; return; }
+  if(!token){ msg.className="msg bad"; msg.textContent="You need the crew token — check the group chat."; return; }
+  const slug = slugify(name);
+  $("aGo").disabled = true;
+  msg.textContent = "Creating…";
+  try{
+    lsSet("hubToken", token);
+    const profile = JSON.stringify({ name, emoji: myEmoji, bio: $("aBio").value.trim(), created: new Date().toISOString().slice(0,10) }, null, 2);
+    await ghPut(token, `players/${slug}.json`, profile, `Player account: ${name}`);
+    setWhoAmI(slug);
+    msg.className = "msg ok"; msg.textContent = "✔ Account created! You're in.";
+    setTimeout(initAcct, 800);
+  }catch(e){
+    msg.className = "msg bad"; msg.textContent = "✘ " + e.message + " (is the token right?)";
+  }
+  $("aGo").disabled = false;
+};
+
+let fileText = null;
+const drop = $("drop"), fileIn = $("file");
+drop.onclick = ()=> fileIn.click();
+drop.ondragover = e=>{ e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = ()=> drop.classList.remove("over");
+drop.ondrop = e=>{ e.preventDefault(); drop.classList.remove("over"); if(e.dataTransfer.files[0]) take(e.dataTransfer.files[0]); };
+fileIn.onchange = ()=>{ if(fileIn.files[0]) take(fileIn.files[0]); };
+function take(f){
+  const r = new FileReader();
+  r.onload = ()=>{ fileText = r.result; $("codeBox").value = ""; drop.textContent = "✔ " + f.name + " loaded"; drop.classList.add("has"); runIt(); };
+  r.readAsText(f);
+}
+function currentCode(){ return $("codeBox").value.trim() || fileText; }
+function runIt(){
+  const code = currentCode();
+  if(!code) return;
+  $("frame").style.display = "";
+  $("frame").srcdoc = code;
+  $("frame").scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+$("testBtn").onclick = runIt;
+
+$("shipBtn").onclick = async ()=>{
+  const msg = $("shipMsg");
+  msg.className = "msg";
+  const code = currentCode(), title = $("gTitle").value.trim(), cat = $("gCat").value.trim().toLowerCase();
+  const token = ($("aToken").value.trim()) || lsGet("hubToken") || "";
+  const me = whoAmI(), p = players.find(x=>x.slug===me);
+  if(!p){ msg.className="msg bad"; msg.textContent="Make your account first (step 1)."; return; }
+  if(!code){ msg.className="msg bad"; msg.textContent="Load your game first (step 3)."; return; }
+  if(!title){ msg.className="msg bad"; msg.textContent="Give it a title."; return; }
+  if(!cat){ msg.className="msg bad"; msg.textContent="Category is missing."; return; }
+  if(!token){ msg.className="msg bad"; msg.textContent="Crew token missing — put it in step 1."; return; }
+  const slug = slugify(title);
+  $("shipBtn").disabled = true;
+  msg.textContent = "Shipping…";
+  try{
+    const info = JSON.stringify({ title, author: p.name, authorSlug: p.slug, category: cat }, null, 2);
+    await ghPut(token, `games/${slug}/index.html`, code, `Ship ${slug} by ${p.name}`);
+    await ghPut(token, `games/${slug}/info.json`, info, `Info for ${slug}`);
+    msg.className = "msg ok";
+    msg.innerHTML = `✔ SHIPPED! Live in ~1 minute → <a href="./" style="color:var(--neon3)">go see the arcade</a>`;
+  }catch(e){
+    msg.className = "msg bad"; msg.textContent = "✘ " + e.message;
+    $("shipBtn").disabled = false;
+  }
+};
+
+initAcct();
+</script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Players — Claude Hub</title>
+<link rel="stylesheet" href="assets/hub.css">
+</head>
+<body>
+<div class="wrap">
+  <h1 class="logo">PLAYERS</h1>
+  <div class="tag">▸ the crew ◂</div>
+  <div id="nav"></div>
+
+  <div id="listView">
+    <div class="count" id="count"></div>
+    <div class="grid" id="grid"><div class="empty">Loading players…</div></div>
+  </div>
+
+  <div id="profileView" style="display:none">
+    <a class="btn alt" href="#" onclick="showList();return false" style="margin-bottom:18px">← all players</a>
+    <div class="panel">
+      <div class="profile-head">
+        <div class="pav" id="pAv"></div>
+        <div>
+          <h2 id="pName"></h2>
+          <div class="bio" id="pBio"></div>
+          <div class="mini" id="pStats" style="margin-top:6px"></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid" id="pGames"></div>
+  </div>
+
+  <footer>No account yet? Make one in <a href="build.html">build mode</a> — takes 20 seconds.</footer>
+</div>
+
+<script src="assets/hub.js"></script>
+<script>
+renderNav("players");
+let players = [], games = [];
+
+async function load(){
+  try{
+    [players, games] = await Promise.all([loadPlayers(), loadGames().catch(()=>[])]);
+  }catch(e){}
+  const known = new Set(players.map(p=>p.slug));
+  for(const g of games){
+    if(!known.has(g.authorSlug)){
+      known.add(g.authorSlug);
+      players.push({slug:g.authorSlug, name:g.author, emoji:gameIcon(g.slug), bio:"", ghost:true});
+    }
+  }
+  route();
+}
+
+function gamesOf(slug){ return games.filter(g=>g.authorSlug===slug); }
+
+function showList(){
+  location.hash = "";
+  document.getElementById("profileView").style.display = "none";
+  document.getElementById("listView").style.display = "";
+  const grid = document.getElementById("grid");
+  document.getElementById("count").textContent = players.length ? `${players.length} PLAYER${players.length>1?"S":""}` : "";
+  if(!players.length){
+    grid.innerHTML = `<div class="empty">Nobody here yet.<br>Make your account in <a href="build.html" style="color:var(--neon3)">build mode</a>!</div>`;
+    return;
+  }
+  grid.innerHTML = "";
+  const me = whoAmI();
+  for(const p of players){
+    const n = gamesOf(p.slug).length;
+    const card = document.createElement("div");
+    card.className = "card pcard";
+    card.onclick = ()=>{ location.hash = encodeURIComponent(p.slug); };
+    card.innerHTML = `
+      <div class="pav">${p.emoji}</div>
+      <div class="pname">${esc(p.name)} ${p.slug===me?'<span class="badge mine">you</span>':""}</div>
+      <div class="pstats">${n} game${n===1?"":"s"}${p.ghost?" · no account yet":""}</div>`;
+    document.getElementById("grid").appendChild(card);
+  }
+}
+
+function showProfile(slug){
+  const p = players.find(x=>x.slug===slug);
+  if(!p){ showList(); return; }
+  document.getElementById("listView").style.display = "none";
+  document.getElementById("profileView").style.display = "";
+  document.getElementById("pAv").textContent = p.emoji;
+  document.getElementById("pName").textContent = p.name;
+  document.getElementById("pBio").textContent = p.bio || (p.ghost ? "Hasn't made an account yet — games uploaded by bot." : "");
+  const list = gamesOf(slug);
+  document.getElementById("pStats").textContent = `${list.length} game${list.length===1?"":"s"} in the arcade`;
+  const grid = document.getElementById("pGames");
+  grid.innerHTML = list.length ? "" : `<div class="empty">No games yet from ${esc(p.name)}.</div>`;
+  for(const g of list){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="card-top">${gameIcon(g.slug)}</div>
+      <div class="card-body">
+        <h3>${esc(g.title)}</h3>
+        <div class="meta"><span class="badge">${esc(g.category)}</span></div>
+        <a class="btn" style="margin-top:auto" href="games/${encodeURIComponent(g.slug)}/">▶ PLAY</a>
+      </div>`;
+    grid.appendChild(card);
+  }
+}
+
+function route(){
+  const h = decodeURIComponent(location.hash.replace(/^#/,""));
+  if(h) showProfile(h); else showList();
+}
+window.addEventListener("hashchange", route);
+load();
+</script>
+</body>
+</html>
