@@ -28,6 +28,11 @@
       </div>
       <button class="btn alt" onclick="switchAcct()">switch / new</button>
     </div>
+    <div id="myGames" style="display:none">
+      <label>Your games</label>
+      <div id="myGamesList" class="rowflex"></div>
+      <div class="msg" id="mgMsg"></div>
+    </div>
     <div id="acctForm">
       <div class="rowflex" id="pickRow" style="display:none"></div>
       <label>Your player name</label>
@@ -36,6 +41,8 @@
       <div class="emoji-row" id="emojiRow"></div>
       <label>Bio (optional trash talk)</label>
       <input id="aBio" placeholder="undefeated. don't even try." maxlength="80">
+      <label>Secret PIN (4+ digits — protects YOUR games from everyone else. Don't forget it!)</label>
+      <input id="aPin" type="password" placeholder="e.g. 4242" maxlength="12" inputmode="numeric">
       <label>Crew token (from the group chat — saved on this device)</label>
       <input id="aToken" type="password" placeholder="github_pat_...">
       <button class="btn" style="margin-top:16px" id="aGo">CREATE MY ACCOUNT</button>
@@ -115,6 +122,18 @@ function copyPrompt(btn){
   .catch(()=>{ $("promptBox").select(); document.execCommand("copy"); });
 }
 
+async function pinOK(pl){
+  if(!pl.lock) return true;
+  const saved = lsGet("hubPin:"+pl.slug);
+  if(saved && await sha256(pl.slug+":"+saved) === pl.lock) return true;
+  const pin = prompt(`PIN for ${pl.name}?`);
+  if(pin == null) return false;
+  if(await sha256(pl.slug+":"+pin.trim()) === pl.lock){ lsSet("hubPin:"+pl.slug, pin.trim()); return true; }
+  alert("Wrong PIN.");
+  return false;
+}
+
+let myGamesCache = [];
 async function initAcct(){
   players = await loadPlayers().catch(()=>[]);
   const me = whoAmI();
@@ -124,6 +143,7 @@ async function initAcct(){
     $("acctForm").style.display = "none";
     $("meAv").textContent = p.emoji;
     $("meName").textContent = p.name;
+    renderMyGames(p);
   } else if(players.length){
     const row = $("pickRow");
     row.style.display = "";
@@ -131,10 +151,50 @@ async function initAcct(){
     for(const pl of players){
       const b = document.createElement("button");
       b.className = "btn alt";
-      b.textContent = `${pl.emoji} ${pl.name}`;
-      b.onclick = ()=>{ setWhoAmI(pl.slug); initAcct(); };
+      b.textContent = `${pl.emoji} ${pl.name}${pl.lock ? " 🔒" : ""}`;
+      b.onclick = async ()=>{ if(await pinOK(pl)){ setWhoAmI(pl.slug); initAcct(); } };
       row.appendChild(b);
     }
+  }
+}
+
+async function renderMyGames(p){
+  const box = $("myGames"), list = $("myGamesList");
+  try{ myGamesCache = (await loadGames()).filter(g=>g.authorSlug===p.slug); }catch(e){ myGamesCache = []; }
+  if(!myGamesCache.length){ box.style.display = "none"; return; }
+  box.style.display = "";
+  list.innerHTML = "";
+  for(const g of myGamesCache){
+    const wrap = document.createElement("span");
+    wrap.className = "rowflex";
+    const open = document.createElement("a");
+    open.className = "btn alt"; open.textContent = "▶ " + g.title; open.href = `games/${encodeURIComponent(g.slug)}/`;
+    const del = document.createElement("button");
+    del.className = "btn alt"; del.textContent = "🗑";
+    del.title = "Delete " + g.title;
+    del.onclick = ()=> deleteGame(g, p);
+    wrap.appendChild(open); wrap.appendChild(del);
+    list.appendChild(wrap);
+  }
+}
+
+async function deleteGame(g, p){
+  const msg = $("mgMsg");
+  msg.className = "msg";
+  if(!confirm(`Really delete "${g.title}" forever?`)) return;
+  if(!(await pinOK(p))) return;
+  const token = lsGet("hubToken") || $("aToken").value.trim();
+  if(!token){ msg.className="msg bad"; msg.textContent="Crew token missing — put it in the form (hit switch / new)."; return; }
+  msg.textContent = "Deleting…";
+  try{
+    const files = await apiList(`games/${g.slug}`, "tmpDel");
+    for(const f of files.filter(x=>x.type==="file")){
+      await ghDelete(token, `games/${g.slug}/${f.name}`, `Delete ${g.slug} (by owner ${p.name})`);
+    }
+    msg.className = "msg ok"; msg.textContent = `✔ "${g.title}" deleted.`;
+    setTimeout(()=>initAcct(), 800);
+  }catch(e){
+    msg.className = "msg bad"; msg.textContent = "✘ " + e.message;
   }
 }
 function switchAcct(){
@@ -145,19 +205,26 @@ function switchAcct(){
 }
 
 $("aGo").onclick = async ()=>{
-  const name = $("aName").value.trim(), token = $("aToken").value.trim(), msg = $("aMsg");
+  const name = $("aName").value.trim(), token = $("aToken").value.trim(), pin = $("aPin").value.trim(), msg = $("aMsg");
   msg.className = "msg";
   if(!name){ msg.className="msg bad"; msg.textContent="Pick a name first!"; return; }
+  if(pin.length < 4){ msg.className="msg bad"; msg.textContent="PIN needs at least 4 digits."; return; }
   if(!token){ msg.className="msg bad"; msg.textContent="You need the crew token — check the group chat."; return; }
   const slug = slugify(name);
+  const taken = players.find(x=>x.slug===slug);
+  if(taken && taken.lock){
+    if(!(await pinOK(taken))){ msg.className="msg bad"; msg.textContent="That name is taken (and PIN-locked). Pick another."; return; }
+  }
   $("aGo").disabled = true;
   msg.textContent = "Creating…";
   try{
     lsSet("hubToken", token);
-    const profile = JSON.stringify({ name, emoji: myEmoji, bio: $("aBio").value.trim(), created: new Date().toISOString().slice(0,10) }, null, 2);
+    const lock = await sha256(slug + ":" + pin);
+    const profile = JSON.stringify({ name, emoji: myEmoji, bio: $("aBio").value.trim(), lock, created: new Date().toISOString().slice(0,10) }, null, 2);
     await ghPut(token, `players/${slug}.json`, profile, `Player account: ${name}`);
     setWhoAmI(slug);
-    msg.className = "msg ok"; msg.textContent = "✔ Account created! You're in.";
+    lsSet("hubPin:"+slug, pin);
+    msg.className = "msg ok"; msg.textContent = "✔ Account created! Remember that PIN.";
     setTimeout(initAcct, 800);
   }catch(e){
     msg.className = "msg bad"; msg.textContent = "✘ " + e.message + " (is the token right?)";
@@ -202,6 +269,13 @@ $("shipBtn").onclick = async ()=>{
   $("shipBtn").disabled = true;
   msg.textContent = "Shipping…";
   try{
+    const existing = await ghGetJSON(token, `games/${slug}/info.json`);
+    if(existing && existing.authorSlug && existing.authorSlug !== p.slug){
+      msg.className = "msg bad";
+      msg.textContent = `✘ "${title}" already belongs to ${existing.author || existing.authorSlug} — pick a different title.`;
+      $("shipBtn").disabled = false;
+      return;
+    }
     const info = JSON.stringify({ title, author: p.name, authorSlug: p.slug, category: cat }, null, 2);
     await ghPut(token, `games/${slug}/index.html`, code, `Ship ${slug} by ${p.name}`);
     await ghPut(token, `games/${slug}/info.json`, info, `Info for ${slug}`);

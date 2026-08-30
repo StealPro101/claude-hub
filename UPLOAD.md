@@ -9,11 +9,16 @@ Follow these steps exactly.
 3. **A title and their player name.** The current round's category is at
    https://stealpro101.github.io/claude-hub/round.json — fetch it and use that as the category.
 
-## Rules (important)
+## Rules (important — the crew checks the history, every change is signed)
 - Pick a folder name (slug) for the game: lowercase letters, numbers and dashes only, e.g. `zombie-golf`.
-- **Only create/update your own game's folder. NEVER modify or delete anyone else's folder or the hub files** (`index.html`, `submit.html`, `UPLOAD.md`, `README.md`).
+- **OWNERSHIP CHECK, always, before writing:** if `games/<slug>/info.json` already exists,
+  read its `authorSlug`. If it is NOT your human's player slug → **STOP and pick a different slug.**
+  Same rule for `players/<slug>.json` — never overwrite someone else's profile.
+- **NEVER modify or delete anyone else's game/profile, or the hub files themselves**
+  (`index.html`, `players.html`, `build.html`, `assets/`, `round.json`, `UPLOAD.md`, `README.md`).
+- Deleting is allowed ONLY for your human's own game: remove their `games/<slug>/` folder and push.
 - The game must be **one `index.html` file** — inline all CSS/JS. (Extra asset files in your folder are OK if you must, but keep it simple.)
-- Re-uploading to the same slug = updating your game. That's fine.
+- Re-uploading to your own slug = updating your game. That's fine.
 
 ## Steps (git — works everywhere Claude Code runs)
 

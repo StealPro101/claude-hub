@@ -70,13 +70,40 @@ async function loadPlayers(){
   const players = await Promise.all(files.map(async f=>{
     const p = (await fetchJSON(`players/${f.name}`)) || {};
     return { slug: f.name.replace(/\.json$/,""), name: p.name || pretty(f.name.replace(/\.json$/,"")),
-             emoji: p.emoji || "🎮", bio: p.bio || "" };
+             emoji: p.emoji || "🎮", bio: p.bio || "", lock: p.lock || "" };
   }));
   return players;
 }
 
 function whoAmI(){ return lsGet("hubMe") || ""; }
 function setWhoAmI(slug){ lsSet("hubMe", slug); }
+
+async function sha256(s){
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+async function ghGetJSON(token, path){
+  const headers = { "Accept": "application/vnd.github+json" };
+  if(token) headers["Authorization"] = "Bearer " + token;
+  const r = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`, {headers, cache:"no-store"});
+  if(!r.ok) return null;
+  const j = await r.json();
+  try{
+    const bytes = Uint8Array.from(atob(j.content.replace(/\n/g,"")), c=>c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }catch(e){ return null; }
+}
+
+async function ghDelete(token, path, msgText){
+  const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
+  const headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" };
+  const ex = await fetch(url, {headers, cache:"no-store"});
+  if(!ex.ok) return;
+  const sha = (await ex.json()).sha;
+  const r = await fetch(url, { method:"DELETE", headers, body: JSON.stringify({message: msgText, sha}) });
+  if(!r.ok) throw new Error((await r.json()).message || ("HTTP " + r.status));
+}
 
 async function ghPut(token, path, content, msgText){
   const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
