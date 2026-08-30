@@ -52,8 +52,10 @@ const REPO  = host.endsWith(".github.io") ? location.pathname.split("/").filter(
 
 const $ = id => document.getElementById(id);
 let fileText = null;
+function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 
-$("token").value = localStorage.getItem("hubToken") || "";
+$("token").value = lsGet("hubToken") || "";
 
 const drop = $("drop"), fileIn = $("file");
 drop.onclick = () => fileIn.click();
@@ -92,7 +94,7 @@ $("go").onclick = async () => {
   $("go").disabled = true;
   msg.className = "msg"; msg.textContent = "Uploading…";
   try{
-    localStorage.setItem("hubToken", token);
+    lsSet("hubToken", token);
     const info = JSON.stringify({ title: $("title").value.trim(), author: $("author").value.trim(), category: $("category").value.trim().toLowerCase() }, null, 2);
     await putFile(token, `games/${slug}/index.html`, fileText, `Add ${slug}`);
     await putFile(token, `games/${slug}/info.json`, info, `Add ${slug} info`);

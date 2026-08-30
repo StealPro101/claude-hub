@@ -81,6 +81,8 @@ const countEl = document.getElementById("count");
 document.getElementById("uploadLink").href = `https://github.com/${OWNER}/${REPO}/blob/main/UPLOAD.md`;
 
 let games = [], filter = "ALL";
+function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 
 function icon(slug){ let h=0; for(const c of slug) h=(h*31+c.charCodeAt(0))>>>0; return ICONS[h%ICONS.length]; }
 function pretty(slug){ return slug.replace(/[-_]+/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
@@ -103,9 +105,9 @@ async function load(){
         category: (info.category || "uncategorized").toLowerCase()
       };
     }));
-    localStorage.setItem("hubCache", JSON.stringify(games));
+    lsSet("hubCache", JSON.stringify(games));
   }catch(e){
-    const cached = localStorage.getItem("hubCache");
+    const cached = lsGet("hubCache");
     if(cached){ games = JSON.parse(cached); }
     else{
       grid.innerHTML = `<div class="err">Couldn't load the game list right now.<br>Refresh in a minute — GitHub limits how often the list can be fetched.</div>`;
