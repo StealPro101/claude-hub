@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLAUDE HUB</title>
+<style>
+  :root{
+    --bg:#0a0a12; --panel:#14141f; --panel2:#1b1b2a;
+    --text:#eaeaf2; --dim:#8a8aa3;
+    --neon:#ff6b35; --neon2:#7c5cff; --neon3:#2dd4bf;
+    --border:#2a2a3d;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,255,.18), transparent),
+               radial-gradient(ellipse 60% 40% at 90% 110%, rgba(255,107,53,.10), transparent)}
+  .wrap{max-width:1100px;margin:0 auto;padding:32px 20px 60px;position:relative}
+  header{text-align:center;margin-bottom:8px}
+  h1{font-size:clamp(2.2rem,6vw,3.6rem);letter-spacing:.12em;font-weight:900;
+     background:linear-gradient(90deg,var(--neon),var(--neon2),var(--neon3));
+     -webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{color:var(--dim);letter-spacing:.25em;font-size:.8rem;text-transform:uppercase;margin-top:6px}
+  .toolbar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:26px 0 30px}
+  .chip{border:1px solid var(--border);background:var(--panel);color:var(--dim);
+        padding:7px 16px;border-radius:999px;cursor:pointer;font-size:.85rem;transition:.15s}
+  .chip:hover{color:var(--text);border-color:var(--neon2)}
+  .chip.on{background:var(--neon2);border-color:var(--neon2);color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;
+        display:flex;flex-direction:column;transition:transform .15s, box-shadow .15s, border-color .15s}
+  .card:hover{transform:translateY(-4px);border-color:var(--neon2);box-shadow:0 8px 30px rgba(124,92,255,.25)}
+  .card-top{height:110px;display:flex;align-items:center;justify-content:center;font-size:3rem;
+            background:var(--panel2);border-bottom:1px solid var(--border)}
+  .card-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px;flex:1}
+  .card h3{font-size:1.05rem;line-height:1.3}
+  .meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .author{color:var(--dim);font-size:.82rem}
+  .badge{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;padding:3px 9px;border-radius:999px;
+         background:rgba(45,212,191,.12);color:var(--neon3);border:1px solid rgba(45,212,191,.35)}
+  .play{margin-top:auto;display:block;text-align:center;text-decoration:none;font-weight:800;
+        letter-spacing:.15em;padding:11px 0;border-radius:9px;color:#fff;
+        background:linear-gradient(90deg,var(--neon),#ff8f5e);transition:filter .15s}
+  .play:hover{filter:brightness(1.15)}
+  .empty,.err{grid-column:1/-1;text-align:center;color:var(--dim);padding:60px 20px;line-height:1.7}
+  footer{text-align:center;margin-top:44px;color:var(--dim);font-size:.82rem}
+  footer a{color:var(--neon3);text-decoration:none}
+  footer a:hover{text-decoration:underline}
+  .count{color:var(--dim);text-align:center;margin-bottom:16px;font-size:.85rem;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>CLAUDE HUB</h1>
+    <div class="tag">▸ the arcade ◂ &nbsp;5 players &nbsp;·&nbsp; best game wins</div>
+  </header>
+
+  <div class="toolbar" id="chips"></div>
+  <div class="count" id="count"></div>
+  <div class="grid" id="grid"><div class="empty">Loading games…</div></div>
+
+  <footer>
+    Add your game: paste <a id="uploadLink" href="#">UPLOAD.md</a> to your Claude and say “upload my game”
+    &nbsp;·&nbsp; or use the <a href="submit.html">manual submit page</a>
+  </footer>
+</div>
+
+<script>
+// Works on <owner>.github.io/<repo>/ with zero config — detects itself.
+const host = location.hostname;
+const isPages = host.endsWith(".github.io");
+const OWNER = isPages ? host.split(".")[0] : "OWNER";
+const REPO  = isPages ? location.pathname.split("/").filter(Boolean)[0] || "claude-hub" : "claude-hub";
+
+const ICONS = ["🎮","👾","🕹️","🚀","🐍","🧩","⚔️","🏎️","🛸","🎯","🐉","💥"];
+const grid = document.getElementById("grid");
+const chipsEl = document.getElementById("chips");
+const countEl = document.getElementById("count");
+document.getElementById("uploadLink").href = `https://github.com/${OWNER}/${REPO}/blob/main/UPLOAD.md`;
+
+let games = [], filter = "ALL";
+
+function icon(slug){ let h=0; for(const c of slug) h=(h*31+c.charCodeAt(0))>>>0; return ICONS[h%ICONS.length]; }
+function pretty(slug){ return slug.replace(/[-_]+/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
+
+async function load(){
+  try{
+    const r = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/contents/games`);
+    if(!r.ok) throw new Error("api "+r.status);
+    const dirs = (await r.json()).filter(x=>x.type==="dir");
+    games = await Promise.all(dirs.map(async d=>{
+      let info = {};
+      try{
+        const ir = await fetch(`games/${d.name}/info.json`, {cache:"no-store"});
+        if(ir.ok) info = await ir.json();
+      }catch(e){}
+      return {
+        slug: d.name,
+        title: info.title || pretty(d.name),
+        author: info.author || "???",
+        category: (info.category || "uncategorized").toLowerCase()
+      };
+    }));
+    localStorage.setItem("hubCache", JSON.stringify(games));
+  }catch(e){
+    const cached = localStorage.getItem("hubCache");
+    if(cached){ games = JSON.parse(cached); }
+    else{
+      grid.innerHTML = `<div class="err">Couldn't load the game list right now.<br>Refresh in a minute — GitHub limits how often the list can be fetched.</div>`;
+      return;
+    }
+  }
+  buildChips(); render();
+}
+
+function buildChips(){
+  const cats = ["ALL", ...new Set(games.map(g=>g.category))];
+  chipsEl.innerHTML = "";
+  for(const c of cats){
+    const b = document.createElement("button");
+    b.className = "chip" + (c===filter ? " on":"");
+    b.textContent = c.toUpperCase();
+    b.onclick = ()=>{ filter=c; buildChips(); render(); };
+    chipsEl.appendChild(b);
+  }
+}
+
+function render(){
+  const list = games.filter(g=>filter==="ALL"||g.category===filter);
+  countEl.textContent = list.length ? `${list.length} GAME${list.length>1?"S":""} IN THE ARCADE` : "";
+  if(!list.length){
+    grid.innerHTML = `<div class="empty">No games yet.<br>Be the first — tell your Claude to upload one!</div>`;
+    return;
+  }
+  grid.innerHTML = "";
+  for(const g of list){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="card-top">${icon(g.slug)}</div>
+      <div class="card-body">
+        <h3></h3>
+        <div class="meta"><span class="badge"></span><span class="author"></span></div>
+        <a class="play" href="games/${encodeURIComponent(g.slug)}/">▶ PLAY</a>
+      </div>`;
+    card.querySelector("h3").textContent = g.title;
+    card.querySelector(".badge").textContent = g.category;
+    card.querySelector(".author").textContent = "by " + g.author;
+    grid.appendChild(card);
+  }
+}
+load();
+</script>
+</body>
+</html>
