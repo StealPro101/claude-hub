@@ -1321,6 +1321,13 @@ async function testPresenceRoutes() {
   hub = await call(env, '/api/hub');
   const game = hub.body.games.find((g) => g.id === 'friend-one/plain-game');
   eq('a member and a signed-out player both count as playing', game.active, 2);
+  /* the house game is somewhere to be as well (this route once crashed on it) */
+  const houseBeat = await call(env, '/api/presence/beat', { body: { game: 'house/rare-pull', token: 'guest-token-2' } });
+  eq('a beat on the house game answers ok', houseBeat.res.status, 200);
+  const houseVisit = await call(env, '/api/presence/visit', { body: { game: 'house/rare-pull', token: 'guest-token-2' } });
+  eq('a visit on the house game answers ok', houseVisit.res.status, 200);
+  const hubHouse = await call(env, '/api/hub');
+  eq('the house game shows its player', hubHouse.body.games.find((g) => g.id === 'house/rare-pull').active, 1);
   const who = hub.body.members.find((m) => m.login === 'friend-one');
   eq('the member is shown playing', who.presence.state, 'playing');
   eq('with the game', who.presence.game, 'friend-one/plain-game');

@@ -20,7 +20,7 @@ import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
   gamesOfMember, MAX_GAMES_PER_MEMBER, topicOf, setGameMeta, setGameStatus, maySee,
   coverAllowance, putCover, houseGamesWithEdits, addLog, allowance, setLove, reportGame,
-  LOVES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT
+  LOVES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames
 } from './hub.js';
 import { readSession, handleLogin, handleCallback, handleLogout } from './auth.js';
 import { isAdmin, adminState, handleAdmin } from './admin.js';
