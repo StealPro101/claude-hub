@@ -331,7 +331,7 @@ async function testGames() {
   const hub = await call(env, '/api/hub', { cookie: session });
   const ids = hub.body.games.map((g) => g.id);
   ok('the game is in the arcade', ids.indexOf('friend-one/plain-game') >= 0, ids.join(','));
-  ok('house games are still there', ids.indexOf('house/rare-pull') >= 0 && ids.indexOf('house/neon-snake') >= 0);
+  ok('the house game is still there, the removed one is not', ids.indexOf('house/rare-pull') >= 0 && ids.indexOf('house/neon-snake') < 0);
   const house = hub.body.games.find((g) => g.id === 'house/rare-pull');
   eq('a house game plays from the old Pages address', house.url,
     'https://stealpro101.github.io/claude-hub/games/rare-pull/');

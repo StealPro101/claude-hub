@@ -34,14 +34,6 @@ export const HOUSE_GAMES = [
     category: 'trivia',
     emoji: '\u{1F3B4}',
     updated: '2026-08-29T00:00:00Z'
-  },
-  {
-    slug: 'neon-snake',
-    title: 'Neon Snake',
-    description: 'The house snake. Simple, fast, and still unbeaten.',
-    category: 'demo',
-    emoji: '\u{1F40D}',
-    updated: '2026-08-28T00:00:00Z'
   }
 ];
 

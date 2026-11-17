@@ -92,7 +92,7 @@ serves them.
 
 ## 7. Check it
 
-1. Open https://hub.sp101.workers.dev - the arcade, with Rare Pull and Neon Snake.
+1. Open https://hub.sp101.workers.dev - the arcade, with Rare Pull.
 2. Press SIGN IN. Your id is in `ADMIN_GITHUB_IDS`, so you need no invite code.
 3. ADMIN appears in the nav -> open it -> copy the join link and send that to a friend.
 4. The cron runs every 15 minutes on its own; **REFRESH NOW** does it at once.
