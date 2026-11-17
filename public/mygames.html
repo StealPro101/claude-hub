@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My games &mdash; Claude Hub</title>
+<link rel="stylesheet" href="/assets/hub.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to your games</a>
+<div class="wrap">
+  <h1 class="logo">MY GAMES</h1>
+  <div class="tag">&#9656; your own account &#9666;</div>
+  <nav id="nav" aria-label="Main"></nav>
+
+  <main id="main" tabindex="-1">
+    <div class="panel off" id="who">
+      <div class="phead">
+        <img id="meAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="" class="av-sm">
+        <div>
+          <h2 id="meName"></h2>
+          <div class="mini" id="meLogin"></div>
+        </div>
+        <div class="push"><button class="btn alt sm" id="out" type="button">sign out</button></div>
+      </div>
+    </div>
+
+    <div class="panel off" id="signedOut">
+      <h2>SIGN IN FIRST</h2>
+      <p class="tagline">The Hub is for friends with the join link. If you have one, open it and press Sign in with GitHub.</p>
+      <p class="mt-m"><a class="btn" href="/auth/login">&#128273; SIGN IN WITH GITHUB</a> <a class="btn alt" href="/join.html">how joining works</a></p>
+    </div>
+
+    <div class="panel off" id="onHub">
+      <h2>ON THE HUB</h2>
+      <div class="list" id="mine"></div>
+      <p class="msg" id="mineMsg"></p>
+    </div>
+
+    <div class="panel off" id="pick">
+      <h2>YOUR ELIGIBLE REPOS</h2>
+      <p class="tagline">Public, yours, not a fork, not archived, GitHub Pages on. Anything with the topic
+        <span class="logline">claude-hub-game</span> is added by itself within 15 minutes.</p>
+      <div class="list" id="repos"><div class="mini">Asking GitHub&hellip;</div></div>
+    </div>
+
+    <div class="panel off" id="lazy">
+      <h2>LET YOUR CLAUDE DO IT</h2>
+      <div class="copybox">
+        <textarea id="prompt" class="code" readonly rows="12" aria-label="Prompt for your Claude"></textarea>
+        <button class="btn" id="copy" type="button">&#128203; COPY THE PROMPT</button>
+      </div>
+      <p class="msg" id="copyMsg"></p>
+    </div>
+  </main>
+
+  <footer><a href="/">Arcade</a> &middot; <a href="/rules.html">Rules</a></footer>
+</div>
+<script src="/assets/hub.js"></script>
+<script src="/assets/prompt.js"></script>
+<script src="/assets/mygames.js"></script>
+</body>
+</html>

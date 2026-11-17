@@ -1,89 +1,46 @@
-# HOW TO UPLOAD YOUR GAME (instructions for your Claude bot)
+# Paste this to your own Claude
 
-Hi Claude! Your human wants to upload their game to the crew's shared arcade.
-Follow these steps exactly.
+This is the same text the **COPY THE PROMPT** button gives you on
+https://hub.sp101.workers.dev/join.html - put it in your own Claude, in your own folder,
+signed in to your own GitHub.
 
-## What you need from your human first
-1. **The upload token** — they got it from the group chat. It starts with `github_pat_`.
-2. **Their game** — one self-contained HTML file (everything inline: CSS, JS, no external files).
-3. **A title and their player name.** The current round's category is at
-   https://stealpro101.github.io/claude-hub/round.json — fetch it and use that as the category.
+---
 
-## Rules (important — the crew checks the history, every change is signed)
-- Pick a folder name (slug) for the game: lowercase letters, numbers and dashes only, e.g. `zombie-golf`.
-- **OWNERSHIP CHECK, always, before writing:** if `games/<slug>/info.json` already exists,
-  read its `authorSlug`. If it is NOT your human's player slug → **STOP and pick a different slug.**
-  Same rule for `players/<slug>.json` — never overwrite someone else's profile.
-- **NEVER modify or delete anyone else's game/profile, or the hub files themselves**
-  (`index.html`, `players.html`, `build.html`, `assets/`, `round.json`, `UPLOAD.md`, `README.md`).
-- Deleting is allowed ONLY for your human's own game: remove their `games/<slug>/` folder and push.
-- The game must be **one `index.html` file** — inline all CSS/JS. (Extra asset files in your folder are OK if you must, but keep it simple.)
-- Re-uploading to your own slug = updating your game. That's fine.
+I want to put a game on Claude Hub (https://hub.sp101.workers.dev). Do all of this on MY
+OWN GitHub account, using my own git / gh sign-in - never your own and never anyone
+else's:
 
-## Steps (git — works everywhere Claude Code runs)
+1. Make a NEW PUBLIC repo on my account (not a fork), short lowercase name.
+2. Put my game in it as index.html in the repo ROOT (other files are fine, but index.html
+   has to be at the root so the page loads on its own).
+3. Optional hub.json in the root, all fields optional:
+   `{ "title": "max 60 chars", "description": "max 200 chars", "category": "arcade", "emoji": "one emoji" }`
+   Categories: arcade, puzzle, action, shooter, platformer, racing, strategy, trivia,
+   idle, horror, sandbox, sports, card, rhythm, freestyle.
+4. Turn on GitHub Pages: Settings > Pages > Deploy from a branch > my default branch >
+   `/ (root)`. Wait for the first build to finish.
+5. Add the repo topic `claude-hub-game` (the gear next to "About" on the repo page).
+6. Tell me the play address: `https://<my-login>.github.io/<repo>/`
 
-Replace `TOKEN` with the upload token, `my-game` with your slug.
+Hard rules while you do it:
+- NEVER put a key, token, password, API secret or personal information in the game, the
+  repo, the commits or hub.json. Nothing in there that is not meant to be public.
+- Only my own work. No copy of someone else's game, art, music or code without a licence
+  that allows it, and keep the licence notice if there is one.
+- Nothing hateful or sexual, nothing made to trick, scare or harm whoever plays it, and
+  never ask a player for a login, an account or money.
+- The game has to work on its own page with no server: plain HTML, CSS and JS.
 
-```bash
-git clone https://x-access-token:TOKEN@github.com/StealPro101/claude-hub.git /tmp/claude-hub
-mkdir -p /tmp/claude-hub/games/my-game
-```
+---
 
-Then copy your human's game file to `/tmp/claude-hub/games/my-game/index.html`
-(on Windows use the scratchpad directory instead of /tmp).
+## Then
 
-Create `/tmp/claude-hub/games/my-game/info.json`:
+The Hub notices the topic by itself within 15 minutes. You can also open **MY GAMES** on
+the Hub and press Add next to the repo.
 
-```json
-{
-  "title": "My Awesome Game",
-  "author": "TheirName",
-  "authorSlug": "theirname",
-  "category": "this-rounds-category"
-}
-```
+**Not on the Hub yet?** You need the `/join?code=...` link from whoever runs it. Open the
+link, press Sign in with GitHub, done - no password and no token goes anywhere near the
+Hub, and it cannot write anything to your account.
 
-(`authorSlug` = their player name lowercased, spaces/symbols → dashes. It links the game to their account page.)
-
-**Also give them an account** (skip if `players/<authorSlug>.json` already exists in the repo):
-create `players/<authorSlug>.json` — ask them to pick an emoji avatar and a one-line bio:
-
-```json
-{
-  "name": "TheirName",
-  "emoji": "🔥",
-  "bio": "one line of trash talk",
-  "created": "2026-08-30"
-}
-```
-
-Then:
-
-```bash
-cd /tmp/claude-hub
-git add games/my-game players
-git -c user.name="TheirName" -c user.email="hub@example.com" commit -m "Add my-game"
-git push
-```
-
-If push is rejected because someone else pushed first: `git pull --rebase` then `git push` again.
-
-## Done!
-The game appears at `https://StealPro101.github.io/claude-hub/` within about a minute
-(GitHub Pages takes ~30–60 seconds to deploy). Tell your human to refresh the hub.
-
-## If git fails for some reason
-Single-file fallback via the GitHub API (PowerShell example):
-
-```powershell
-$token = "TOKEN"
-$slug = "my-game"
-foreach ($f in @("index.html","info.json")) {
-  $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\$f"))
-  $url = "https://api.github.com/repos/StealPro101/claude-hub/contents/games/$slug/$f"
-  $existing = try { (Invoke-RestMethod $url -Headers @{Authorization="Bearer $token"}).sha } catch { $null }
-  $body = @{ message="Add $slug/$f"; content=$b64 }
-  if ($existing) { $body.sha = $existing }
-  Invoke-RestMethod $url -Method PUT -Headers @{Authorization="Bearer $token"; Accept="application/vnd.github+json"} -Body ($body | ConvertTo-Json)
-}
-```
+**Taking a game down:** MY GAMES -> remove. It stays off the Hub until you add it again.
+Your repo is never touched.

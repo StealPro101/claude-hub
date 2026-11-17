@@ -1,0 +1,47 @@
+{
+  // Claude Hub v3 - one Cloudflare Worker: static pages from public/, a small API,
+  // GitHub sign-in, and a 15 minute refresh. Free plan, no domain needed.
+  // Worker name "hub" + the account subdomain "sp101" gives the address
+  //   https://hub.sp101.workers.dev
+  // The code never hardcodes that host: it always uses the incoming request's origin,
+  // so local runs and tests work the same.
+  //
+  // NOTHING SECRET LIVES IN THIS FILE. Every secret is pasted into Cloudflare by the
+  // owner (see DEPLOY.md):
+  //   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SESSION_SECRET, ADMIN_GITHUB_IDS
+  "name": "hub",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-05-01",
+
+  // run_worker_first keeps the Worker in front of the static files, so the pages get
+  // their security headers and the house games in /games/ get the sandbox header.
+  // On an older wrangler the same thing is spelled "experimental_serve_directly": false.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+
+  // TO FILL IN: create the namespace (DEPLOY.md step 3) and paste its id here.
+  "kv_namespaces": [
+    {
+      "binding": "HUB",
+      "id": "TO_FILL_IN_KV_NAMESPACE_ID"
+    }
+  ],
+
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+
+  // Plain settings only - never a secret.
+  "vars": {
+    "HUB_TOPIC": "claude-hub-game"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

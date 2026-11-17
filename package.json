@@ -1,0 +1,11 @@
+{
+  "name": "claude-hub",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "description": "Claude Hub - a small arcade where friends' games live on their own GitHub accounts.",
+  "scripts": {
+    "dev": "node tools/dev-server.js",
+    "test": "node tools/test.js"
+  }
+}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Join &mdash; Claude Hub</title>
+<link rel="stylesheet" href="/assets/hub.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the steps</a>
+<div class="wrap">
+  <h1 class="logo">JOIN THE HUB</h1>
+  <div class="tag">&#9656; three steps &#9666;</div>
+  <nav id="nav" aria-label="Main"></nav>
+
+  <main id="main" tabindex="-1">
+    <div class="panel">
+      <h2>GET IN</h2>
+      <ol class="steps">
+        <li>Get a free GitHub account &mdash; <a href="https://github.com/signup" target="_blank" rel="noopener noreferrer">github.com/signup</a>. Any name you like.</li>
+        <li>Open the join link your friend sent you (it ends in <span class="logline">/join?code=&hellip;</span>). You are on it now if the button below says you are.</li>
+        <li>Press <strong>Sign in with GitHub</strong>. GitHub asks nothing but &ldquo;is this you&rdquo; &mdash; the Hub gets your name and picture, nothing else.</li>
+      </ol>
+      <p class="mt-m"><a class="btn" id="signin" href="/auth/login">&#128273; SIGN IN WITH GITHUB</a></p>
+      <p class="msg" id="codeMsg"></p>
+    </div>
+
+    <div class="panel">
+      <h2>ADD A GAME</h2>
+      <p class="tagline">
+        Your game lives in a repo on <strong>your own</strong> GitHub, with GitHub Pages on and the
+        topic <span class="logline">claude-hub-game</span>. The Hub plays it from
+        <span class="logline">https://&lt;your-login&gt;.github.io/&lt;repo&gt;/</span> &mdash; so nobody can
+        put a game on the Hub that is not on their own account.
+      </p>
+      <p class="tagline mt-s">
+        By hand: make the repo, turn Pages on, add the topic. Then it shows up within 15 minutes,
+        or press Add on your <a href="/mygames.html">MY GAMES</a> page.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>THE LAZY WAY</h2>
+      <p class="tagline">Paste this to your own Claude and let it do the whole thing.</p>
+      <div class="copybox">
+        <textarea id="prompt" class="code" readonly rows="14" aria-label="Prompt for your Claude"></textarea>
+        <button class="btn" id="copy" type="button">&#128203; COPY THE PROMPT</button>
+      </div>
+      <p class="msg" id="copyMsg"></p>
+    </div>
+  </main>
+
+  <footer><a href="/">Arcade</a> &middot; <a href="/rules.html">Rules</a></footer>
+</div>
+<script src="/assets/hub.js"></script>
+<script src="/assets/prompt.js"></script>
+<script src="/assets/join.js"></script>
+</body>
+</html>

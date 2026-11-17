@@ -1,0 +1,43 @@
+/* The same tiny storage interface as Cloudflare KV, backed by one JSON file.
+   Local runs only - the Worker on Cloudflare always uses KV. */
+import fs from 'node:fs';
+import path from 'node:path';
+
+export function fileStore(file) {
+  const full = path.resolve(file);
+  let data = {};
+  try {
+    data = JSON.parse(fs.readFileSync(full, 'utf8'));
+  } catch (e) {
+    data = {};
+  }
+
+  function save() {
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, JSON.stringify(data, null, 2));
+  }
+
+  return {
+    file: full,
+    async get(key) {
+      const raw = data[key];
+      return raw === undefined ? null : JSON.parse(raw);
+    },
+    async put(key, value) {
+      data[key] = JSON.stringify(value);
+      save();
+    },
+    async delete(key) {
+      delete data[key];
+      save();
+    },
+    async list(prefix) {
+      return Object.keys(data).filter((k) => k.startsWith(prefix)).sort()
+        .map((k) => ({ key: k, value: JSON.parse(data[k]) }));
+    },
+    reset() {
+      data = {};
+      save();
+    }
+  };
+}

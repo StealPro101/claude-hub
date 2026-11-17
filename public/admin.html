@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin &mdash; Claude Hub</title>
+<link rel="stylesheet" href="/assets/hub.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the panel</a>
+<div class="wrap">
+  <h1 class="logo">ADMIN</h1>
+  <div class="tag">&#9656; owner only &#9666;</div>
+  <nav id="nav" aria-label="Main"></nav>
+
+  <main id="main" tabindex="-1">
+    <div class="panel off" id="nope">
+      <h2>NOT FOR YOU</h2>
+      <p class="tagline" id="nopeWhy">This panel is the Hub owner&rsquo;s. Nothing here works for anyone else.</p>
+      <p class="mt-m"><a class="btn alt" href="/">back to the arcade</a></p>
+    </div>
+
+    <div id="panel" class="off">
+      <div class="panel">
+        <h2>ROUND</h2>
+        <div class="rowflex">
+          <div class="f-num"><label for="rNum">number</label><input id="rNum" type="number" min="1" max="9999"></div>
+          <div class="f-mid"><label for="rCat">category</label><input id="rCat" type="text" maxlength="40"></div>
+          <div class="f-wide"><label for="rNote">note</label><input id="rNote" type="text" maxlength="200"></div>
+        </div>
+        <p class="mt-m"><button class="btn" id="rSave" type="button">SAVE ROUND</button></p>
+        <p class="msg" id="rMsg"></p>
+      </div>
+
+      <div class="panel">
+        <h2>INVITE</h2>
+        <p class="tagline" id="invState"></p>
+        <div class="copybox">
+          <input id="invLink" type="text" readonly aria-label="Join link" class="f-link">
+          <button class="btn alt sm" id="invCopy" type="button">copy link</button>
+        </div>
+        <p class="item acts mt-m bare">
+          <button class="btn alt sm" id="invToggle" type="button">toggle invite-only</button>
+          <button class="btn alt sm" id="invNew" type="button">new code</button>
+        </p>
+        <p class="msg" id="invMsg"></p>
+      </div>
+
+      <div class="panel">
+        <h2>REFRESH</h2>
+        <p class="tagline" id="refState"></p>
+        <p class="mt-m"><button class="btn" id="refNow" type="button">REFRESH NOW</button></p>
+        <p class="msg" id="refMsg"></p>
+      </div>
+
+      <div class="panel">
+        <h2>MEMBERS</h2>
+        <div class="list" id="members"></div>
+        <p class="msg" id="mMsg"></p>
+      </div>
+
+      <div class="panel">
+        <h2>GAMES</h2>
+        <div class="list" id="games"></div>
+        <p class="msg" id="gMsg"></p>
+      </div>
+
+      <div class="panel">
+        <h2>BANNED</h2>
+        <div class="list" id="bans"></div>
+      </div>
+
+      <div class="panel">
+        <h2>ACTIVITY</h2>
+        <div id="log" class="logline"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer><a href="/">Arcade</a></footer>
+</div>
+<script src="/assets/hub.js"></script>
+<script src="/assets/admin.js"></script>
+</body>
+</html>
