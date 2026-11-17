@@ -1,3 +1,4 @@
+import { fakePresence } from './fake-presence.js';
 /*
  * A fake GitHub, so the whole sign-in -> add game -> play -> admin flow runs offline
  * with nothing downloaded and no real account touched.
@@ -254,6 +255,7 @@ export function fakeFetch(state, bases) {
 
 export function fakeEnv(extra) {
   return Object.assign({
+    PRESENCE: fakePresence(),
     GITHUB_CLIENT_ID: 'fake-client-id',
     GITHUB_CLIENT_SECRET: 'fake-client-secret',
     SESSION_SECRET: 'test-session-secret-0123456789',

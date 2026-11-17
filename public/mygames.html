@@ -3,124 +3,102 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>My games &mdash; Claude Hub</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
+<title>My games &middot; Hub</title>
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to your games</a>
-
-<div class="wrap">
-  <header class="top">
-    <a class="mark" href="/">Claude Hub</a>
-    <nav id="nav" aria-label="Main"></nav>
-  </header>
-
-  <main id="main">
-    <div class="off" id="signedOut">
-      <h1 class="page-title">My games</h1>
-      <p class="under">The Hub is for friends with a join link. If you have one, open it and sign in with GitHub.</p>
-      <p class="btn-row mt-l">
-        <a class="btn btn--go" href="/auth/login">Sign in with GitHub</a>
-        <a class="btn" href="/join.html">How joining works</a>
-      </p>
+<header id="bar" class="bar"></header>
+<main id="main" class="col" tabindex="-1">
+  <section class="box off" id="signedOut">
+    <div class="box-head"><h2>Sign in first</h2></div>
+    <div class="box-body">
+      <p>This place is for friends with a join link. If you have one, open it and sign in with GitHub.</p>
+      <p class="btn-row mt"><a class="btn" href="/auth/login">Sign in with GitHub</a>
+        <a class="btn btn--grey" href="/join.html">How joining works</a></p>
     </div>
+  </section>
 
-    <div class="off" id="signedIn">
-      <div class="profile">
-        <img id="meAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
+  <div class="off" id="signedIn">
+    <section class="box off" id="form">
+      <div class="box-head"><h2 id="formTitle">Set up &amp; publish</h2><span class="sub" id="formFor"></span></div>
+      <div class="box-body form-grid">
         <div>
-          <h1 class="page-title">My games</h1>
-          <p class="hint" id="meLogin"></p>
-          <p class="hint narrow">Your project is public on GitHub &mdash; that is how the Hub finds it.
-            On the Hub it stays private until you publish it.</p>
+          <div class="field"><label for="fName">Name</label>
+            <input id="fName" type="text" maxlength="60" autocomplete="off"></div>
+          <div class="field"><label for="fDesc">Short description</label>
+            <textarea id="fDesc" rows="2" maxlength="200"></textarea></div>
+          <div class="field"><label for="fCat">Category</label><select id="fCat"></select></div>
+          <div class="field"><label for="fHow">How to play</label>
+            <textarea id="fHow" rows="4" maxlength="600" placeholder="Arrows to move. Space to jump."></textarea>
+            <p class="hint">Shown beside the game. Line breaks are kept.</p></div>
+          <div class="field"><label for="fNotes">Notes and credits</label>
+            <textarea id="fNotes" rows="4" maxlength="600" placeholder="Music by a friend, sprites by me."></textarea></div>
+          <p class="btn-row mt">
+            <button class="btn" id="fPublish" type="button">Publish</button>
+            <button class="btn btn--grey" id="fSave" type="button">Save as draft</button>
+            <button class="btn btn--grey" id="fClose" type="button">Close</button>
+          </p>
+          <p class="msg" id="fMsg"></p>
         </div>
-        <span class="btn-row push"><button class="btn btn--sm" id="out" type="button">Sign out</button></span>
+        <div>
+          <span class="label">Cover picture</span>
+          <div class="crop" id="crop" tabindex="0" role="img" aria-label="Cover crop. Drag or use the arrow keys to move the picture.">
+            <div class="crop-empty" id="cropEmpty">No picture yet</div>
+            <canvas id="cropCanvas" class="off" width="960" height="600"></canvas>
+          </div>
+          <label class="drop" id="drop">Choose a picture, or drop one here
+            <input type="file" id="file" accept="image/*"></label>
+          <p class="hint">Drag to choose what shows. Only the cropped 960&times;600 picture is kept
+            &mdash; not the original, and not where it was taken.</p>
+          <p class="btn-row"><button class="btn btn--grey btn--sm" id="fCoverOff" type="button">Remove picture</button></p>
+        </div>
       </div>
+    </section>
 
-      <!-- the publish form, shown when a game is being set up -->
-      <section class="panel off" id="form">
-        <h2 id="formTitle">Set up &amp; publish</h2>
-        <p class="under" id="formFor"></p>
-        <div class="panel-body form-grid">
-          <div>
-            <div class="field">
-              <label class="label" for="fName">Name</label>
-              <input id="fName" type="text" maxlength="60" autocomplete="off">
-            </div>
-            <div class="field">
-              <label class="label" for="fDesc">Description</label>
-              <textarea id="fDesc" rows="3" maxlength="200"></textarea>
-            </div>
-            <div class="field">
-              <label class="label" for="fCat">Category</label>
-              <select id="fCat"></select>
-            </div>
-            <p class="btn-row mt-l">
-              <button class="btn btn--go" id="fPublish" type="button">Publish</button>
-              <button class="btn" id="fSave" type="button">Save as draft</button>
-              <button class="btn btn--plain" id="fClose" type="button">Close</button>
-            </p>
-            <p class="msg" id="fMsg"></p>
-          </div>
+    <section class="box">
+      <div class="box-head"><h2>Drafts</h2><span class="sub">only you can see these</span></div>
+      <div class="box-body"><div class="rows" id="drafts"></div></div>
+    </section>
 
-          <div>
-            <span class="label">Cover picture</span>
-            <div class="crop" id="crop" tabindex="0" role="img" aria-label="Cover crop. Drag or use the arrow keys to move the picture.">
-              <div class="crop-empty" id="cropEmpty">No picture yet</div>
-              <canvas id="cropCanvas" class="off" width="960" height="600"></canvas>
-            </div>
-            <label class="drop mt" id="drop">
-              Choose a picture, or drop one here
-              <input type="file" id="file" accept="image/*">
-            </label>
-            <p class="hint">Drag the picture to choose what shows. We keep only the cropped
-              960&times;600 version &mdash; not the original, and not where it was taken.</p>
-            <p class="btn-row"><button class="btn btn--sm btn--plain" id="fCoverOff" type="button">Remove picture</button></p>
-          </div>
-        </div>
-      </section>
+    <section class="box">
+      <div class="box-head"><h2>Shared</h2><span class="sub">everyone can see these</span></div>
+      <div class="box-body"><div class="rows" id="live"></div></div>
+    </section>
 
-      <section class="panel" id="draftsPanel">
-        <h2>Drafts</h2>
-        <p class="under">Only you can see these. Give one a name and a picture, then publish it.</p>
-        <div class="rows panel-body" id="drafts"></div>
-      </section>
-
-      <section class="panel" id="livePanel">
-        <h2>Published</h2>
-        <p class="under">On the shelf for everyone.</p>
-        <div class="rows panel-body" id="live"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Add a game</h2>
-        <p class="under">Your repos that can be games: public, yours, not a fork, not archived,
-          GitHub Pages switched on. Anything carrying the topic <span class="mono">claude-hub-game</span>
-          is picked up on its own within 15 minutes &mdash; as a draft.</p>
-        <div class="rows panel-body" id="repos"></div>
+    <section class="box">
+      <div class="box-head"><h2>Add a game</h2></div>
+      <div class="box-body">
+        <p class="hint">Your repo is public on GitHub &mdash; that is how it is found. Here it stays
+          private until you publish it. Anything carrying the topic
+          <span class="mono">claude-hub-game</span> turns up on its own within 15 minutes, as a draft.</p>
+        <div class="rows" id="repos"></div>
         <p class="msg" id="msg"></p>
-      </section>
+      </div>
+    </section>
 
-      <section class="panel">
-        <h2>Let your Claude do it</h2>
-        <p class="under">Paste this to your own Claude and it will make the repo for you.</p>
-        <div class="panel-body">
-          <textarea id="prompt" class="mono" readonly rows="10" aria-label="Prompt for your Claude"></textarea>
-          <p class="btn-row mt"><button class="btn" id="copy" type="button">Copy the prompt</button></p>
-          <p class="msg" id="copyMsg"></p>
-        </div>
-      </section>
-    </div>
-  </main>
+    <section class="box">
+      <div class="box-head"><h2>Settings</h2></div>
+      <div class="box-body">
+        <label class="btn-row" for="showMe"><input type="checkbox" id="showMe" class="inline-field">
+          <span>Show when I&rsquo;m online</span></label>
+        <p class="hint">With this off, nobody sees you as online or playing. Your plays still count
+          towards a game&rsquo;s numbers, without your name.</p>
+        <p class="msg" id="setMsg"></p>
+      </div>
+    </section>
 
-  <footer>
-    <span>Your games, your account.</span>
-    <span><a href="/">Arcade</a> &nbsp; <a href="/rules.html">Rules</a></span>
-  </footer>
-</div>
-
+    <section class="box">
+      <div class="box-head"><h2>Let your Claude do it</h2></div>
+      <div class="box-body">
+        <textarea id="prompt" class="mono" readonly rows="9" aria-label="Prompt for your Claude"></textarea>
+        <p class="btn-row mt"><button class="btn btn--grey" id="copy" type="button">Copy the prompt</button></p>
+        <p class="msg" id="copyMsg"></p>
+      </div>
+    </section>
+  </div>
+</main>
+<footer id="foot"></footer>
 <script src="/assets/hub.js"></script>
 <script src="/assets/prompt.js"></script>
 <script src="/assets/cover.js"></script>

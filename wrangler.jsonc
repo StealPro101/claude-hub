@@ -32,6 +32,25 @@
     }
   ],
 
+  // Who is here, who is playing what, and how often a game has been opened. This lives
+  // in one Durable Object instead of KV, because presence changes every few seconds and
+  // the free KV plan allows about a thousand writes a day. The free plan only offers
+  // SQLite-backed Durable Objects, hence new_sqlite_classes.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PRESENCE",
+        "class_name": "Presence"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Presence"]
+    }
+  ],
+
   "triggers": {
     "crons": ["*/15 * * * *"]
   },

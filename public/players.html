@@ -3,50 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Players &mdash; Claude Hub</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
+<title>Players &middot; Hub</title>
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the players</a>
-
-<div class="wrap">
-  <header class="top">
-    <a class="mark" href="/">Claude Hub</a>
-    <nav id="nav" aria-label="Main"></nav>
-  </header>
-
-  <main id="main">
-    <div id="listView">
-      <h1 class="page-title">Players</h1>
-      <p class="under" id="count"></p>
-      <div class="people" id="people"></div>
-    </div>
-
-    <div id="profileView" class="off">
-      <p class="mt-l"><a class="btn btn--plain btn--sm" href="/players.html">&larr; All players</a></p>
-      <div class="profile">
-        <img id="pAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
-        <div>
-          <h1 class="page-title" id="pName"></h1>
-          <p class="hint" id="pLogin"></p>
-          <p class="bio" id="pBio"></p>
-          <p class="hint" id="pStats"></p>
-        </div>
+<header id="bar" class="bar"></header>
+<main id="main" class="col" tabindex="-1">
+  <div id="listView">
+    <section class="box">
+      <div class="box-head"><h2 id="count">Players</h2></div>
+      <div class="box-body"><div class="people-grid" id="people"></div></div>
+    </section>
+  </div>
+  <div id="profileView" class="off">
+    <div class="profile-head">
+      <img id="pAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
+      <div>
+        <h1 id="pName"></h1>
+        <div class="meta" id="pMeta"></div>
+        <div id="pPresence"></div>
+        <div class="btn-row" id="pActs"></div>
       </div>
-      <div class="section-head"><h2>Their games</h2></div>
-      <div class="cards" id="pGames"></div>
-      <p class="dim mt" id="pEmpty"></p>
     </div>
-  </main>
-
-  <footer>
-    <span>Everyone here signed in with their own GitHub.</span>
-    <span><a href="/">Arcade</a> &nbsp; <a href="/rules.html">Rules</a></span>
-  </footer>
-</div>
-
+    <div class="two-up">
+      <section class="box" id="aboutBox">
+        <div class="box-head"><h2>About</h2></div>
+        <div class="box-body"><p id="pBio" class="pre"></p></div>
+      </section>
+      <section class="box">
+        <div class="box-head"><h2>On the Hub</h2></div>
+        <div class="box-body"><p id="pStats"></p></div>
+      </section>
+    </div>
+    <section class="box">
+      <div class="box-head"><h2>Shared games</h2></div>
+      <div class="box-body"><div class="grid" id="pGames"></div><p class="muted" id="pEmpty"></p></div>
+    </section>
+    <section class="box off" id="lovedBox">
+      <div class="box-head"><h2>Loved games</h2></div>
+      <div class="box-body"><div class="grid" id="pLoved"></div></div>
+    </section>
+  </div>
+</main>
+<footer id="foot"></footer>
 <script src="/assets/hub.js"></script>
 <script src="/assets/players.js"></script>
 </body>

@@ -14,6 +14,9 @@
 import fs from 'node:fs';
 import { handle } from '../worker/index.js';
 import { memoryStore } from '../worker/store.js';
+import { getState, update } from '../worker/state.js';
+import { PresenceCore } from '../worker/presence.js';
+import { fakePresence, fakeStorage } from './fake-presence.js';
 import {
   clean, pretty, isLogin, isRepoName, playUrl, normalizeHubJson, repoEligible, hasTopic,
   isOkEmoji, allowedCategory, safeAvatar
@@ -43,6 +46,33 @@ function eq(name, got, want) {
 }
 
 /* ---------- harness ---------- */
+
+/* The Hub keeps everything in one document now; these read it the way a test wants. */
+async function gameOf(store, ownerId, repo) {
+  return (await getState(store)).games[ownerId + '/' + repo] || null;
+}
+async function gameRows(store, prefix) {
+  const games = (await getState(store)).games;
+  return Object.keys(games)
+    .filter((k) => !prefix || k.indexOf(prefix) === 0)
+    .map((k) => ({ key: 'game:' + k, value: games[k] }));
+}
+async function memberOf(store, id) {
+  return (await getState(store)).members[String(id)] || null;
+}
+async function tombOf(store, ownerId, repo) {
+  return (await getState(store)).tombs[ownerId + '/' + repo] || null;
+}
+async function setMember(store, id, rec) {
+  await update(store, (st) => { st.members[String(id)] = rec; });
+}
+async function dropMember(store, id) {
+  await update(store, (st) => { delete st.members[String(id)]; });
+}
+async function setBan(store, rec) {
+  await update(store, (st) => { st.bans[String(rec.id)] = rec; });
+}
+
 
 const current = { state: fakeState() };
 globalThis.fetch = async function (input, init) {
@@ -100,9 +130,9 @@ function cookieValue(cookies, name) {
 
 /* Games arrive as drafts now; some tests only care about what the arcade shows. */
 async function publishAll(store) {
-  for (const row of await store.list('game:')) {
-    await store.put(row.key, Object.assign({}, row.value, { status: 'published' }));
-  }
+  await update(store, (st) => {
+    for (const k of Object.keys(st.games)) st.games[k].status = 'published';
+  });
 }
 
 /* Full sign-in through the fake GitHub. Returns the session cookie or the refusal. */
@@ -262,14 +292,14 @@ async function testInvite() {
   const noCode = await signIn(env, 'friend-one');
   eq('no invite refused', noCode.status, 403);
   ok('no invite explains the join link', noCode.text.indexOf('join link') > 0);
-  ok('no member was made', (await store.get('member:7001')) === null);
+  ok('no member was made', (await memberOf(store, 7001)) === null);
 
   const wrongCode = await signIn(env, 'friend-one', 'WRONGCODE');
   eq('wrong invite refused', wrongCode.status, 403);
 
   const right = await signIn(env, 'friend-one', code);
   ok('right invite gets in', Boolean(right.session), 'status ' + right.status);
-  const member = await store.get('member:7001');
+  const member = await memberOf(store, 7001);
   ok('member stored with the numeric id', member && member.id === 7001 && member.login === 'friend-one');
   eq('first sign-in lands on my games', right.location, '/mygames.html');
 
@@ -288,11 +318,11 @@ async function testInvite() {
 
   /* banned */
   const b = world();
-  await b.store.put('ban:7004', { id: 7004, login: 'banned-bob', at: 'now', by: 'test' });
+  await setBan(b.store, { id: 7004, login: 'banned-bob', at: 'now', by: 'test' });
   const sb = await getSettings(b.store);
   const banned = await signIn(b.env, 'banned-bob', sb.inviteCode);
   eq('banned cannot sign in', banned.status, 403);
-  ok('banned made no member', (await b.store.get('member:7004')) === null);
+  ok('banned made no member', (await memberOf(b.store, 7004)) === null);
 }
 
 /* ---------- 5. adding and removing games ---------- */
@@ -345,7 +375,7 @@ async function testGames() {
 
   const rm = await call(env, '/api/games/remove', { body: { repo: 'plain-game' }, cookie: session });
   eq('removing my own game works', rm.res.status, 200);
-  ok('tombstone kept', (await store.get('tomb:7001/plain-game')).by === 'member');
+  ok('tombstone kept', (await tombOf(store, 7001, 'plain-game')).by === 'member');
 }
 
 /* ---------- 6. the refresh and tombstones ---------- */
@@ -359,13 +389,13 @@ async function testRefresh() {
   const first = await refresh(env, store, {});
   ok('topic games were added by themselves', first.added >= 3, JSON.stringify(first));
   ok('refresh stayed well under 50 GitHub calls', first.used < 50, 'used ' + first.used);
-  const games = (await store.list('game:')).map((r) => r.value.id).sort();
+  const games = (await gameRows(store)).map((r) => r.value.id).sort();
   ok('snake-dash came in on the topic', games.indexOf('friend-one/snake-dash') >= 0, games.join());
   ok('plain-game (no topic) stayed out', games.indexOf('friend-one/plain-game') < 0, games.join());
   ok('a repo named <login>.github.io plays at the root',
-    (await store.get('game:7002/friend-two.github.io')).url === 'https://friend-two.github.io/');
+    (await gameOf(store, 7002, 'friend-two.github.io')).url === 'https://friend-two.github.io/');
 
-  const xss = await store.get('game:7001/xss-game');
+  const xss = await gameOf(store, 7001, 'xss-game');
   eq('a title full of HTML is kept as plain text', xss.title, '<img src=x onerror=alert(1)>');
   eq('a javascript: link in a description stays text',
     xss.description.indexOf('javascript:') > 0, true);
@@ -376,12 +406,12 @@ async function testRefresh() {
   await call(env, '/api/games/remove', { body: { repo: 'snake-dash' }, cookie: session });
   const second = await refresh(env, store, {});
   ok('a game removed by the member is not auto-added again',
-    (await store.get('game:7001/snake-dash')) === null, JSON.stringify(second));
+    (await gameOf(store, 7001, 'snake-dash')) === null, JSON.stringify(second));
 
   /* re-adding by hand clears the member's own tombstone */
   const back = await call(env, '/api/games/add', { body: { repo: 'snake-dash' }, cookie: session });
   eq('the member can add it back', back.res.status, 200);
-  ok('their own tombstone is gone', (await store.get('tomb:7001/snake-dash')) === null);
+  ok('their own tombstone is gone', (await tombOf(store, 7001, 'snake-dash')) === null);
 
   /* an admin tombstone the member cannot clear */
   const admin = await joined('sp101-admin', env, store);
@@ -394,21 +424,21 @@ async function testRefresh() {
   ok('the refusal points at the owner', String(retry.body.error).indexOf('owner') > 0, retry.body.error);
   const third = await refresh(env, store, {});
   ok('the refresh does not bring it back either',
-    (await store.get('game:7001/snake-dash')) === null, JSON.stringify(third));
+    (await gameOf(store, 7001, 'snake-dash')) === null, JSON.stringify(third));
 
   /* a GitHub outage must not lose anything */
-  const before = (await store.list('game:')).length;
+  const before = (await gameRows(store)).length;
   current.state.broken = true;
   const broke = await refresh(env, store, {});
   current.state.broken = false;
-  eq('nothing was lost during an outage', (await store.list('game:')).length, before);
+  eq('nothing was lost during an outage', (await gameRows(store)).length, before);
   ok('the outage was counted, not ignored', broke.errors > 0, JSON.stringify(broke));
 
   /* a repo that disappears goes away */
   current.state.repos['friend-two'] = [];
   await refresh(env, store, { batch: 4 });
   await refresh(env, store, { batch: 4 });
-  ok('a vanished repo is dropped', (await store.get('game:7002/friend-two.github.io')) === null);
+  ok('a vanished repo is dropped', (await gameOf(store, 7002, 'friend-two.github.io')) === null);
 }
 
 async function testBudget() {
@@ -434,7 +464,7 @@ async function testBudget() {
         description: '', stargazers_count: 0, pushed_at: '2026-11-02T00:00:00Z'
       }
     ];
-    await store.put('member:' + id, {
+    await setMember(store, id, {
       id: id, login: login, name: 'Friend ' + id, avatar: '', bio: '',
       url: 'https://github.com/' + login, joined: '2026-11-01', seen: '2026-11-01'
     });
@@ -447,7 +477,7 @@ async function testBudget() {
     worst = Math.max(worst, budget.used);
   }
   ok('30 members: no invocation goes over 50 GitHub calls', worst < 50, 'worst run used ' + worst);
-  const seen = (await store.list('game:')).length;
+  const seen = (await gameRows(store)).length;
   ok('the rotation keeps picking up new members', seen >= 20, seen + ' games after 10 runs');
 }
 
@@ -467,7 +497,7 @@ async function testAdmin() {
   eq('and is told plainly', asFriend.body.error, 'not for you');
   const friendPost = await call(env, '/api/admin/member/ban', { body: { id: 9001 }, cookie: friend });
   eq('a friend cannot ban anyone', friendPost.res.status, 403);
-  ok('the admin is still there', Boolean(await store.get('member:9001')));
+  ok('the admin is still there', Boolean(await memberOf(store, 9001)));
   const anonPost = await call(env, '/api/admin/round', { body: { round: 9 } });
   eq('signed out cannot set the round', anonPost.res.status, 401);
 
@@ -496,7 +526,7 @@ async function testAdmin() {
   eq('the arcade shows the new round', hub1.body.round.round, 4);
 
   await publishAll(store);
-  const target = (await store.list('game:')).map((r) => r.value)
+  const target = (await gameRows(store)).map((r) => r.value)
     .find((g) => g.owner === 'friend-one');
   const hide = await call(env, '/api/admin/game/hide', { body: { id: target.id, on: true }, cookie: admin });
   eq('hide works', hide.res.status, 200);
@@ -526,8 +556,8 @@ async function testAdmin() {
 
   const ban = await call(env, '/api/admin/member/ban', { body: { id: 7001 }, cookie: admin });
   eq('ban works', ban.res.status, 200);
-  ok('the member is gone', (await store.get('member:7001')) === null);
-  ok('their games are gone too', (await store.list('game:7001/')).length === 0);
+  ok('the member is gone', (await memberOf(store, 7001)) === null);
+  ok('their games are gone too', (await gameRows(store, '7001/')).length === 0);
   const hub5 = await call(env, '/api/hub');
   ok('the arcade has no trace of them',
     hub5.body.games.filter((g) => g.owner === 'friend-one').length === 0);
@@ -566,7 +596,7 @@ async function testMisc() {
   eq('an unknown api path is a 404', unknown.res.status, 404);
 
   const payload = await hubPayload(env, store, null);
-  eq('the payload says version 3', payload.v, 3);
+  eq('the payload says version 4', payload.v, 4);
   eq('signed out there is no me', payload.me, null);
   eq('house games are in the payload', payload.games.length, HOUSE_GAMES.length);
 
@@ -707,15 +737,15 @@ async function testRenamedAccounts() {
   const s = await getSettings(store, env);
   await signIn(env, 'friend-one', s.inviteCode);
   await refresh(env, store, {});
-  const before = (await store.list('game:')).map((r) => r.value);
+  const before = (await gameRows(store)).map((r) => r.value);
   ok('the member has games to start with', before.length >= 2, String(before.length));
 
   renameFakeUser(current.state, 'friend-one', 'friend-renamed');
   const sum = await refresh(env, store, {});
-  const member = await store.get('member:7001');
+  const member = await memberOf(store, 7001);
   eq('the member keeps their id and gets the new login', member.login, 'friend-renamed');
   eq('and is not marked gone', Boolean(member.gone), false);
-  const after = (await store.list('game:')).map((r) => r.value);
+  const after = (await gameRows(store)).map((r) => r.value);
   eq('the same games are still there', after.length, before.length);
   ok('their ids follow the new login',
     after.every((g) => g.id.indexOf('friend-renamed/') === 0), after.map((g) => g.id).join());
@@ -732,15 +762,15 @@ async function testRenamedAccounts() {
   delete current.state.users['friend-renamed'];
   delete current.state.repos['friend-renamed'];
   for (let i = 0; i < 2; i++) await refresh(env, store, {});
-  const half = (await store.list('game:')).map((r) => r.value);
+  const half = (await gameRows(store)).map((r) => r.value);
   ok('two failures change nothing yet', half.every((g) => !g.hidden), 'hidden too early');
-  eq('but the misses are counted', (await store.get('member:7001')).misses, 2);
+  eq('but the misses are counted', (await memberOf(store, 7001)).misses, 2);
 
   await refresh(env, store, {});
-  const gone = (await store.list('game:')).map((r) => r.value);
+  const gone = (await gameRows(store)).map((r) => r.value);
   eq('the games are still stored after the third failure', gone.length, before.length);
   ok('but every one of them is hidden', gone.every((g) => g.hidden), 'still showing');
-  eq('and the member is flagged gone', (await store.get('member:7001')).gone, true);
+  eq('and the member is flagged gone', (await memberOf(store, 7001)).gone, true);
   const hub2 = await call(env, '/api/hub');
   eq('so the arcade shows none of them',
     hub2.body.games.filter((g) => !g.house).length, 0);
@@ -781,7 +811,7 @@ async function testDrafts() {
   eq('a draft does not count on a profile', member.games, 0);
 
   await refresh(env, store, {});
-  const topicGame = await store.get('game:7001/snake-dash');
+  const topicGame = await gameOf(store, 7001, 'snake-dash');
   ok('a game the topic brought in is a draft too', topicGame && topicGame.status === 'draft');
 
   /* the publish form, then publish */
@@ -811,7 +841,7 @@ async function testDrafts() {
   /* the refresh must never undo what a person typed */
   await refresh(env, store, {});
   await refresh(env, store, {});
-  const kept = await store.get('game:7001/plain-game');
+  const kept = await gameOf(store, 7001, 'plain-game');
   eq('the refresh leaves the name alone', kept.title, 'My First Game');
   eq('and the description', kept.description, 'a little thing I made');
   eq('and the category', kept.category, 'puzzle');
@@ -835,7 +865,7 @@ async function testDrafts() {
   });
   eq('the Hub owner can unpublish', adminUn.res.status, 200);
   eq('and it really is a draft again',
-    (await store.get('game:7001/plain-game')).status, 'draft');
+    (await gameOf(store, 7001, 'plain-game')).status, 'draft');
 
   const notMine = await call(env, '/api/games/publish', {
     body: { repo: 'plain-game' }, cookie: other
@@ -911,7 +941,7 @@ async function testCovers() {
       r.body.cover);
   }
 
-  const stored = await store.get('game:7001/plain-game');
+  const stored = await gameOf(store, 7001, 'plain-game');
   eq('the game remembers the type', stored.cover.type, 'image/webp');
   ok('and a short version mark', typeof stored.cover.v === 'string' && stored.cover.v.length <= 10);
 
@@ -939,7 +969,7 @@ async function testCovers() {
     (await upload({ raw: pngBytes(), rawType: 'image/png', cookie: other })).res.status, 404);
   const stranger = world();
   const notMember = await signIn(stranger.env, 'sp101-admin');
-  await stranger.store.delete('member:9001');
+  await dropMember(stranger.store, 9001);
   eq('someone who is not a member is refused',
     (await call(stranger.env, '/api/games/cover?repo=plain-game', {
       raw: pngBytes(), rawType: 'image/png', cookie: notMember.session
@@ -980,7 +1010,7 @@ async function testCovers() {
     (await store.list('cover:')).length === 0);
   ok('nor the signing key', (await store.list('')).every((r) => r.key.indexOf('secret:') !== 0));
   const hub = await call(env, '/api/hub');
-  const want = '/img/cover/7001/plain-game?v=' + (await store.get('game:7001/plain-game')).cover.v;
+  const want = '/img/cover/7001/plain-game?v=' + (await gameOf(store, 7001, 'plain-game')).cover.v;
   ok('the arcade gets a cover address, not bytes',
     hub.body.games.some((g) => g.cover === want), want);
 
@@ -988,7 +1018,7 @@ async function testCovers() {
   const off = await call(env, '/api/games/cover-remove', { body: { repo: 'plain-game' }, cookie: mine });
   eq('the maker can take the picture off', off.res.status, 200);
   eq('and it is really gone', (await call(env, '/img/cover/7001/plain-game?v=1')).res.status, 404);
-  eq('the record forgets it', (await store.get('game:7001/plain-game')).cover, null);
+  eq('the record forgets it', (await gameOf(store, 7001, 'plain-game')).cover, null);
 
   /* admin remove-picture */
   await upload({ raw: pngBytes(), rawType: 'image/png', cookie: mine });
@@ -1019,8 +1049,21 @@ async function testCovers() {
     if (i < 12) ok('upload ' + (i + 1) + ' of 12 allowed', r.res.status === 200, 'status ' + r.res.status);
   }
   eq('the 13th picture in an hour is refused', last, 429);
-  ok('the counter lives in the store, not in memory',
-    (await limited.store.get('rate:cover:7001')).n >= 12);
+  ok('the counter is kept by the presence object, so KV is never touched for it',
+    limited.env.PRESENCE.core.rates.get('cover:7001').n >= 12,
+    JSON.stringify([...limited.env.PRESENCE.core.rates.keys()]));
+  ok('and nothing about it is in the store',
+    (await limited.store.get('rate:cover:7001')) === null);
+
+  /* with no presence object at all the counter falls back to the store */
+  const noDo = world({ PRESENCE: null });
+  const who2 = await joined('friend-one', noDo.env, noDo.store);
+  await call(noDo.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: who2 });
+  await call(noDo.env, '/api/games/cover?repo=plain-game', {
+    raw: pngBytes(), rawType: 'image/png', cookie: who2
+  });
+  ok('without the presence object the store keeps the count',
+    (await noDo.store.get('rate:cover:7001')).n === 1);
 
   /* house games: the owner only */
   const houseByFriend = await call(env, '/api/games/cover?house=rare-pull', {
@@ -1046,7 +1089,386 @@ async function testCovers() {
   eq('a member cannot', byMember.res.status, 403);
 }
 
-/* ---------- 14. headers and static pages ---------- */
+/* ---------- 14. loves, reports, how-to text ---------- */
+
+async function testLoves() {
+  console.log('loves and reports');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  const admin = await joined('sp101-admin', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+
+  const draftLove = await call(env, '/api/games/love', {
+    body: { id: 'friend-one/plain-game', on: true }, cookie: other
+  });
+  eq('a draft cannot be loved', draftLove.res.status, 400);
+
+  await call(env, '/api/games/meta', { body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine });
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+
+  const anon = await call(env, '/api/games/love', { body: { id: 'friend-one/plain-game', on: true } });
+  eq('a signed-out visitor cannot love', anon.res.status, 401);
+
+  const love = await call(env, '/api/games/love', {
+    body: { id: 'friend-one/plain-game', on: true }, cookie: other
+  });
+  eq('a member can love a published game', love.res.status, 200);
+  eq('and the count comes back', love.body.loves, 1);
+  eq('marked as mine', love.body.lovedByMe, true);
+
+  const again = await call(env, '/api/games/love', {
+    body: { id: 'friend-one/plain-game', on: true }, cookie: other
+  });
+  eq('loving twice changes nothing', again.body.loves, 1);
+
+  const seen = await call(env, '/api/hub', { cookie: other });
+  const g = seen.body.games.find((x) => x.id === 'friend-one/plain-game');
+  eq('the arcade shows the count', g.loves, 1);
+  eq('and that this member loves it', g.lovedByMe, true);
+  const strangerView = await call(env, '/api/hub');
+  const g2 = strangerView.body.games.find((x) => x.id === 'friend-one/plain-game');
+  eq('a stranger sees the count', g2.loves, 1);
+  eq('but nothing about who', g2.lovedByMe, false);
+  ok('and no list of names anywhere in the payload',
+    JSON.stringify(strangerView.body.games).indexOf('"loves":[') < 0);
+  const profile = strangerView.body.members.find((m) => m.login === 'friend-two');
+  ok('a profile does list what that person loves (public by design)',
+    profile.loved.indexOf('friend-one/plain-game') >= 0, JSON.stringify(profile.loved));
+
+  const off = await call(env, '/api/games/love', {
+    body: { id: 'friend-one/plain-game', on: false }, cookie: other
+  });
+  eq('loving can be taken back', off.body.loves, 0);
+
+  /* a love survives the game going to draft and back */
+  await call(env, '/api/games/love', { body: { id: 'friend-one/plain-game', on: true }, cookie: other });
+  await call(env, '/api/games/unpublish', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('the love survived unpublish and publish',
+    (await gameOf(store, 7001, 'plain-game')).loves.length, 1);
+
+  /* the house game keeps its loves on its own record */
+  const houseLove = await call(env, '/api/games/love', {
+    body: { id: 'house/rare-pull', on: true }, cookie: admin
+  });
+  eq('the house game can be loved too', houseLove.body.loves, 1);
+  const hub2 = await call(env, '/api/hub');
+  eq('and it shows', hub2.body.games.find((x) => x.id === 'house/rare-pull').loves, 1);
+
+  /* a member who leaves takes their loves with them, at the next refresh */
+  await call(env, '/api/admin/member/ban', { body: { id: 7002 }, cookie: admin });
+  eq('the love is still there right after the ban',
+    (await gameOf(store, 7001, 'plain-game')).loves.length, 1);
+  await refresh(env, store, {});
+  eq('and gone after the refresh',
+    (await gameOf(store, 7001, 'plain-game')).loves.length, 0);
+
+  /* the hourly allowance */
+  const limited = world();
+  const a = await joined('friend-one', limited.env, limited.store);
+  const b = await joined('friend-two', limited.env, limited.store);
+  await call(limited.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: a });
+  await call(limited.env, '/api/games/meta', { body: { repo: 'plain-game', title: 'P' }, cookie: a });
+  await call(limited.env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: a });
+  let hit = 0;
+  for (let i = 0; i < 62; i++) {
+    const r = await call(limited.env, '/api/games/love', {
+      body: { id: 'friend-one/plain-game', on: i % 2 === 0 }, cookie: b
+    });
+    if (r.res.status === 429) { hit = i + 1; break; }
+  }
+  eq('love number 61 in an hour is refused', hit, 61);
+
+  /* reports */
+  const rep = await call(env, '/api/games/report', { body: { id: 'friend-one/plain-game' }, cookie: mine });
+  eq('a member can report a game', rep.res.status, 200);
+  const state = await call(env, '/api/admin/state', { cookie: admin });
+  ok('and it lands in the owner’s activity log',
+    state.body.log.some((e) => e.what === 'reported' && e.detail === 'friend-one/plain-game'),
+    JSON.stringify(state.body.log.slice(0, 3)));
+  ok('the report is nowhere in the public payload',
+    JSON.stringify((await call(env, '/api/hub')).body).indexOf('reported') < 0);
+  let repHit = 0;
+  for (let i = 0; i < 8; i++) {
+    const r = await call(env, '/api/games/report', {
+      body: { id: 'friend-one/plain-game' }, cookie: mine
+    });
+    if (r.res.status === 429) { repHit = i + 2; break; }
+  }
+  eq('the sixth report in a day is refused', repHit, 6);
+  const junk = await call(env, '/api/games/report', { body: { id: 'nobody/nothing' }, cookie: other });
+  ok('reporting something that does not exist is refused',
+    junk.res.status === 404 || junk.res.status === 403, 'status ' + junk.res.status);
+}
+
+async function testLongFields() {
+  console.log('how to play / notes');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+
+  const set = await call(env, '/api/games/meta', {
+    body: {
+      repo: 'plain-game', title: 'Plain Game',
+      howto: 'Arrows to move.\n\n\n\nSpace to jump.   Really.',
+      notes: 'x'.repeat(900)
+    },
+    cookie: mine
+  });
+  eq('the long fields are accepted', set.res.status, 200);
+  eq('line breaks are kept', set.body.game.howto, 'Arrows to move.\n\nSpace to jump. Really.');
+  eq('and they are capped', set.body.game.notes.length, 600);
+
+  const hostile = await call(env, '/api/games/meta', {
+    body: {
+      repo: 'plain-game', title: 'Plain Game',
+      howto: '<img src=x onerror=alert(1)>\n<script>alert(2)</script>'
+    },
+    cookie: mine
+  });
+  eq('html in them is kept as plain text', hostile.body.game.howto,
+    '<img src=x onerror=alert(1)>\n<script>alert(2)</script>');
+
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  const hub = await call(env, '/api/hub');
+  const g = hub.body.games.find((x) => x.id === 'friend-one/plain-game');
+  ok('the arcade payload carries them', g.howto.indexOf('onerror') > 0, g.howto.slice(0, 40));
+  ok('and saving again with an empty notes field clears it', g.notes === '', g.notes);
+
+  await refresh(env, store, {});
+  await refresh(env, store, {});
+  eq('the refresh never overwrites them',
+    (await gameOf(store, 7001, 'plain-game')).howto.indexOf('onerror') > 0, true);
+}
+
+/* ---------- 15. presence ---------- */
+
+async function testPresenceCore() {
+  console.log('presence');
+  let now = 1000000;
+  const core = new PresenceCore(fakeStorage(), () => now);
+
+  core.beat('7001', null, 'friend-one/game-a');
+  core.beat('7002', null, null);
+  core.beat(null, 'tok-abc', 'friend-one/game-a');
+  let snap = await core.snapshot();
+  eq('a member in a game is playing', snap.members['7001'].game, 'friend-one/game-a');
+  eq('a member on the site is online', snap.members['7002'].game, null);
+  eq('both the member and the guest are counted as playing', snap.active['friend-one/game-a'], 2);
+  ok('and the guest is nowhere by name', JSON.stringify(snap.members).indexOf('tok-abc') < 0);
+
+  now += 91000;
+  snap = await core.snapshot();
+  eq('after 90 seconds with no beat everyone is gone', Object.keys(snap.members).length, 0);
+  eq('and nobody is playing', Object.keys(snap.active).length, 0);
+
+  core.beat('7001', null, 'friend-one/game-a');
+  core.leave('7001', null);
+  snap = await core.snapshot();
+  eq('leaving takes effect at once', Object.keys(snap.members).length, 0);
+
+  /* visits */
+  const first = await core.visit('friend-one/game-a', '7001');
+  eq('a visit counts', first.counted, true);
+  const second = await core.visit('friend-one/game-a', '7001');
+  eq('the same person again within half an hour does not', second.counted, false);
+  await core.visit('friend-one/game-a', 'ip:1.2.3.4');
+  snap = await core.snapshot();
+  eq('two different people make two visits', snap.visits['friend-one/game-a'], 2);
+  now += 31 * 60000;
+  await core.visit('friend-one/game-a', '7001');
+  snap = await core.snapshot();
+  eq('and the same person counts again after half an hour', snap.visits['friend-one/game-a'], 3);
+
+  /* the counters survive the object being put to sleep */
+  const storage = core.storage;
+  await core.maybeSave(true);
+  const woken = new PresenceCore(storage, () => now);
+  const snap2 = await woken.snapshot();
+  eq('visits come back after an eviction', snap2.visits['friend-one/game-a'], 3);
+  eq('presence does not, which is fine', Object.keys(snap2.members).length, 0);
+
+  /* rate counting without touching KV */
+  let left = null;
+  for (let i = 0; i < 4; i++) left = core.rate('love:9', 3, 60000);
+  eq('the fourth in the window is refused', left.ok, false);
+  now += 61000;
+  eq('and allowed again in the next window', core.rate('love:9', 3, 60000).ok, true);
+}
+
+async function testPresenceRoutes() {
+  console.log('presence through the site');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/games/meta', { body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine });
+
+  const draftBeat = await call(env, '/api/presence/beat', {
+    body: { game: 'friend-one/plain-game' }, cookie: mine
+  });
+  eq('a beat is always accepted', draftBeat.res.status, 200);
+  let hub = await call(env, '/api/hub', { cookie: mine });
+  eq('but a draft is not somewhere you can be seen playing',
+    hub.body.games.find((g) => g.id === 'friend-one/plain-game').active, 0);
+  eq('the member shows as online instead',
+    hub.body.members.find((m) => m.login === 'friend-one').presence.state, 'online');
+
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/presence/beat', { body: { game: 'friend-one/plain-game' }, cookie: mine });
+  await call(env, '/api/presence/beat', { body: { game: 'friend-one/plain-game', token: 'guest-token-1' } });
+  hub = await call(env, '/api/hub');
+  const game = hub.body.games.find((g) => g.id === 'friend-one/plain-game');
+  eq('a member and a signed-out player both count as playing', game.active, 2);
+  const who = hub.body.members.find((m) => m.login === 'friend-one');
+  eq('the member is shown playing', who.presence.state, 'playing');
+  eq('with the game', who.presence.game, 'friend-one/plain-game');
+  ok('the signed-out player is in no list of people',
+    JSON.stringify(hub.body.members).indexOf('guest-token-1') < 0);
+  const idle = hub.body.members.find((m) => m.login === 'friend-two');
+  eq('somebody who never beat is offline', idle.presence.state, 'offline');
+
+  /* just loading a page counts as being here, or everyone would flicker offline
+     between pages (the leave beacon fires on every navigation) */
+  const fresh = world();
+  const f1 = await joined('friend-one', fresh.env, fresh.store);
+  const firstLoad = await call(fresh.env, '/api/hub', { cookie: f1 });
+  const secondLoad = await call(fresh.env, '/api/hub', { cookie: f1 });
+  eq('a page view on its own makes a member online',
+    secondLoad.body.members.find((m) => m.login === 'friend-one').presence.state, 'online');
+  ok('and a signed-out visit makes nobody online',
+    (await call(fresh.env, '/api/hub')).body.members
+      .every((m) => m.login !== 'friend-one' || m.presence.state === 'online'));
+  ok('the first load already knew about them', firstLoad.res.status === 200);
+
+  /* visits */
+  const v1 = await call(env, '/api/presence/visit', {
+    body: { game: 'friend-one/plain-game' }, cookie: other
+  });
+  eq('pressing play counts a visit', v1.body.counted, true);
+  const v2 = await call(env, '/api/presence/visit', {
+    body: { game: 'friend-one/plain-game' }, cookie: other
+  });
+  eq('pressing play again straight away does not', v2.body.counted, false);
+  hub = await call(env, '/api/hub');
+  eq('the visit count shows', hub.body.games.find((g) => g.id === 'friend-one/plain-game').visits, 1);
+
+  /* the "show when I am online" switch */
+  const off = await call(env, '/api/me/presence', { body: { show: false }, cookie: mine });
+  eq('presence can be switched off', off.body.show, false);
+  await call(env, '/api/presence/beat', { body: { game: 'friend-one/plain-game' }, cookie: mine });
+  hub = await call(env, '/api/hub');
+  eq('a hidden member is never listed as online',
+    hub.body.members.find((m) => m.login === 'friend-one').presence.state, 'offline');
+  ok('but their play still counts in the number playing',
+    hub.body.games.find((g) => g.id === 'friend-one/plain-game').active >= 1,
+    String(hub.body.games.find((g) => g.id === 'friend-one/plain-game').active));
+
+  /* and with no Durable Object at all the site just has no counts */
+  const bare = world({ PRESENCE: null });
+  const b1 = await joined('friend-one', bare.env, bare.store);
+  await call(bare.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: b1 });
+  const beat = await call(bare.env, '/api/presence/beat', {
+    body: { game: 'friend-one/plain-game' }, cookie: b1
+  });
+  eq('a beat with no presence object still answers politely', beat.res.status, 200);
+  const bareHub = await call(bare.env, '/api/hub', { cookie: b1 });
+  eq('every game shows no players', bareHub.body.games.every((g) => g.active === 0), true);
+  eq('and everyone is offline',
+    bareHub.body.members.every((m) => m.presence.state === 'offline'), true);
+
+  /* a broken object must not break a page either */
+  const broken = world();
+  broken.env.PRESENCE.break(true);
+  const okHub = await call(broken.env, '/api/hub');
+  eq('a presence object that throws is ignored', okHub.res.status, 200);
+}
+
+/* ---------- 16. one document, no listing ---------- */
+
+async function testOneDocument() {
+  console.log('one document');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/games/meta', { body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine });
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+
+  /* KV charges for list operations, so no request path may use one */
+  let lists = 0;
+  const watched = Object.assign({}, store, {
+    list: async (prefix) => {
+      lists++;
+      return store.list(prefix);
+    }
+  });
+  const watchedEnv = Object.assign({}, env, { HUB_STORE: watched });
+  await call(watchedEnv, '/api/hub');
+  await call(watchedEnv, '/api/hub', { cookie: mine });
+  await call(watchedEnv, '/api/me', { cookie: mine });
+  await call(watchedEnv, '/api/games/love', { body: { id: 'friend-one/plain-game', on: true }, cookie: mine });
+  await call(watchedEnv, '/api/presence/beat', { body: { game: 'friend-one/plain-game' }, cookie: mine });
+  const admin = await joined('sp101-admin', watchedEnv, watched);
+  await call(watchedEnv, '/api/admin/state', { cookie: admin });
+  eq('no request path lists keys', lists, 0);
+
+  /* everything is in one value */
+  const keys = [...store._map.keys()].filter((k) => k.indexOf('rate:') !== 0 && k.indexOf('secret:') !== 0);
+  eq('and that value is the only one', keys.join(','), 'state');
+
+  /* the move from the old shape, run once, on the first request */
+  const old = memoryStore({
+    'member:7001': {
+      id: 7001, login: 'friend-one', name: 'Ada', avatar: '', bio: '',
+      url: 'https://github.com/friend-one', joined: '2026-11-01'
+    },
+    'game:7001/old-game': {
+      id: 'friend-one/old-game', ownerId: 7001, owner: 'friend-one', repo: 'old-game',
+      title: 'Old Game', description: '', category: 'arcade', status: 'published',
+      url: 'https://friend-one.github.io/old-game/', loves: []
+    },
+    'ban:7004': { id: 7004, login: 'banned-bob', at: 'then', by: 'owner' },
+    'tomb:7001/gone': { by: 'admin', at: 'then' },
+    settings: {
+      round: { round: 7, category: 'horror', note: 'spooky' },
+      inviteRequired: true, inviteCode: 'KEEPTHIS', rotation: 0, log: []
+    }
+  });
+  const oldEnv = fakeEnv({ HUB_STORE: old, ASSETS: null });
+  const moved = await call(oldEnv, '/api/hub');
+  eq('the old data is still there after the move', moved.body.round.round, 7);
+  ok('the member came across', moved.body.members.some((m) => m.login === 'friend-one'));
+  ok('so did the game', moved.body.games.some((g) => g.id === 'friend-one/old-game'));
+  const settingsNow = await getSettings(old);
+  eq('and the invite code survived', settingsNow.inviteCode, 'KEEPTHIS');
+  const state = await getState(old);
+  ok('the ban came across', Boolean(state.bans['7004']));
+  ok('and the tombstone', Boolean(state.tombs['7001/gone']));
+  ok('the old keys are left exactly where they were',
+    (await old.get('member:7001')) !== null && (await old.get('settings')) !== null);
+  ok('the new document is there too', (await old.get('state')) !== null);
+
+  /* running again changes nothing */
+  const before = JSON.stringify(await old.get('state'));
+  await call(oldEnv, '/api/hub');
+  eq('a second request does not move anything again',
+    JSON.stringify((await getState(old)).members), JSON.stringify(JSON.parse(before).members));
+
+  /* an edit made while a slow refresh is running must not be lost */
+  const race = world();
+  const r1 = await joined('friend-one', race.env, race.store);
+  await call(race.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: r1 });
+  const slowRefresh = refresh(race.env, race.store, {});
+  await call(race.env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: 'Typed While Refreshing' }, cookie: r1
+  });
+  await slowRefresh;
+  eq('the name typed during a refresh survived it',
+    (await gameOf(race.store, 7001, 'plain-game')).title, 'Typed While Refreshing');
+}
+
+/* ---------- 17. headers and static pages ---------- */
 
 async function testHeaders() {
   console.log('headers and pages');
@@ -1106,7 +1528,8 @@ async function testHeaders() {
 
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
-  testDrafts, testCovers, testHeaders];
+  testDrafts, testCovers, testLoves, testLongFields, testPresenceCore,
+  testPresenceRoutes, testOneDocument, testHeaders];
 
 (async () => {
   for (const g of groups) {

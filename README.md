@@ -55,7 +55,7 @@ tools/      local only: dev server with a fake GitHub, tests
 
 ```
 node tools/dev-server.js --reset    http://127.0.0.1:8797, works offline
-node tools/test.js                  302 checks, no network
+node tools/test.js                  383 checks, no network
 node tools/seed-fixture.js 9        fill the local store with a made-up Hub to look at
 ```
 

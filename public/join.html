@@ -3,73 +3,52 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Join &mdash; Claude Hub</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
+<title>Join &middot; Hub</title>
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the steps</a>
-
-<div class="wrap">
-  <header class="top">
-    <a class="mark" href="/">Claude Hub</a>
-    <nav id="nav" aria-label="Main"></nav>
-  </header>
-
-  <main id="main">
-    <h1 class="page-title">Join the Hub</h1>
-    <p class="under">Three steps, no password to invent, nothing to install.</p>
-
-    <section class="panel mt-l">
+<header id="bar" class="bar"></header>
+<main id="main" class="col" tabindex="-1">
+  <section class="box">
+    <div class="box-head"><h2>Join in</h2></div>
+    <div class="box-body">
       <ol class="steps">
         <li>Get a free GitHub account &mdash;
-          <a href="https://github.com/signup" target="_blank" rel="noopener noreferrer">github.com/signup</a>.
-          Any name you like.</li>
-        <li>Open the join link a friend sent you. It ends in
-          <span class="mono">/join?code=&hellip;</span> &mdash; you are on it now if the line
-          under the button says so.</li>
-        <li>Press <strong>Sign in with GitHub</strong>. GitHub only asks &ldquo;is this you&rdquo;.
-          The Hub gets your name and picture and nothing else, and can never write anything
-          to your account.</li>
+          <a href="https://github.com/signup" target="_blank" rel="noopener noreferrer">github.com/signup</a>.</li>
+        <li>Open the join link a friend sent you. It ends in <span class="mono">/join?code=&hellip;</span>.</li>
+        <li>Press <strong>Sign in with GitHub</strong>. GitHub only asks &ldquo;is this you&rdquo;; nothing can
+          be written to your account and your token is never kept.</li>
       </ol>
-      <p class="btn-row mt-l"><a class="btn btn--go" id="signin" href="/auth/login">Sign in with GitHub</a></p>
+      <p class="btn-row mt"><a class="btn btn--big" id="signin" href="/auth/login">Sign in with GitHub</a></p>
       <p class="msg" id="codeMsg"></p>
-    </section>
+    </div>
+  </section>
 
-    <section class="panel">
-      <h2>Then add a game</h2>
-      <p class="under">A game is one <span class="mono">index.html</span> in a repo on
-        <strong>your own</strong> GitHub, with Pages switched on and the topic
-        <span class="mono">claude-hub-game</span>. The Hub plays it from
-        <span class="mono">https://&lt;your-login&gt;.github.io/&lt;repo&gt;/</span> &mdash; an address
-        it works out itself, so nobody can put a game here that is not on their own account.</p>
-      <ul class="list mt">
-        <li>Your project is public on GitHub &mdash; that is how the Hub finds it.
-          On the Hub it stays <strong>private until you publish it</strong>.</li>
-        <li>New games arrive as drafts. Only you see them until you set the name,
-          description and picture and press Publish.</li>
+  <section class="box">
+    <div class="box-head"><h2>Then add a game</h2></div>
+    <div class="box-body">
+      <ul class="bullets">
+        <li>A game is one <span class="mono">index.html</span> in a public repo on <strong>your own</strong>
+          GitHub, with Pages switched on and the topic <span class="mono">claude-hub-game</span>.</li>
+        <li>Your project is public on GitHub &mdash; that is how it is found. Here it stays private until
+          you publish it.</li>
+        <li>New games arrive as drafts: set a name, a description and a cover picture, then publish.</li>
         <li>Up to twenty games each.</li>
       </ul>
-    </section>
+    </div>
+  </section>
 
-    <section class="panel">
-      <h2>The lazy way</h2>
-      <p class="under">Paste this to your own Claude and let it do the whole thing.</p>
-      <div class="panel-body">
-        <textarea id="prompt" class="mono" readonly rows="12" aria-label="Prompt for your Claude"></textarea>
-        <p class="btn-row mt"><button class="btn" id="copy" type="button">Copy the prompt</button></p>
-        <p class="msg" id="copyMsg"></p>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <span>Invite only, on purpose.</span>
-    <span><a href="/">Arcade</a> &nbsp; <a href="/rules.html">Rules</a></span>
-  </footer>
-</div>
-
+  <section class="box">
+    <div class="box-head"><h2>The lazy way</h2><span class="sub">paste this to your own Claude</span></div>
+    <div class="box-body">
+      <textarea id="prompt" class="mono" readonly rows="10" aria-label="Prompt for your Claude"></textarea>
+      <p class="btn-row mt"><button class="btn" id="copy" type="button">Copy the prompt</button></p>
+      <p class="msg" id="copyMsg"></p>
+    </div>
+  </section>
+</main>
+<footer id="foot"></footer>
 <script src="/assets/hub.js"></script>
 <script src="/assets/prompt.js"></script>
 <script src="/assets/join.js"></script>

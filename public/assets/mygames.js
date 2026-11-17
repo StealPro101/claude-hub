@@ -1,6 +1,6 @@
 /*
- * My games: what is still a draft, what is published, and the form that turns one into
- * the other. The server re-checks that every repo is really yours, every time.
+ * My games: drafts, shared games, the publish form, and the one setting a member has.
+ * The server re-checks that every repo is really theirs, every time.
  */
 (function () {
   'use strict';
@@ -16,23 +16,23 @@
     n.className = 'msg ' + (bad ? 'bad' : 'ok');
   }
 
-  Hub.nav('mygames', null);
+  Hub.bar('mygames', null);
+  Hub.footer();
 
   Hub.data().then(start).catch(function () { Hub.show('signedOut', true); });
 
   function start(d) {
     hub = d;
     me = d.me;
-    Hub.nav('mygames', me);
+    Hub.bar('mygames', d);
     if (!me) {
       Hub.show('signedOut', true);
       return;
     }
+    Hub.beat(null);
     Hub.show('signedIn', true);
     var member = Hub.memberOf(d.members, me.login);
-    document.getElementById('meAv').src = Hub.avatarUrl(member && member.avatar, me.id);
-    document.getElementById('meLogin').textContent =
-      ((member && member.name) || me.login) + ' · @' + me.login;
+    document.getElementById('showMe').checked = !(member && member.hidePresence);
     HubPrompt.mount('prompt', 'copy', 'copyMsg');
     fillCategories(d);
     cropper = Cover.make({
@@ -41,7 +41,7 @@
       empty: document.getElementById('cropEmpty'),
       onChange: function (ev) {
         if (ev && ev.error) say('fMsg', ev.error, true);
-        else say('fMsg', 'Drag the picture to choose what shows, then publish.');
+        else say('fMsg', 'Drag the picture to choose what shows.');
       }
     });
     drawMine();
@@ -74,30 +74,36 @@
   function row(game) {
     var r = Hub.el('div', 'row-item');
     var who = Hub.el('div', 'who');
-    var thumb = Hub.el('span', 'thumb');
-    thumb.appendChild(Hub.coverNode(game));
-    who.appendChild(thumb);
+    var mini = Hub.el('div', 'mini');
+    var shot = Hub.el('div', 'shot');
+    Hub.coverInto(shot, game);
+    mini.appendChild(shot);
+    who.appendChild(mini);
     var box = Hub.el('div');
     box.appendChild(Hub.el('div', 'name', game.title || 'Untitled'));
     box.appendChild(Hub.el('div', 'sub', game.id + ' · ' + (game.category || 'freestyle')));
+    if (game.status !== 'draft') {
+      box.appendChild(Hub.el('div', 'sub',
+        Hub.count(game.loves || 0, 'love') + ' · ' + Hub.count(game.visits || 0, 'visit')));
+    }
     who.appendChild(box);
     r.appendChild(who);
 
-    var acts = Hub.el('div', 'btn-row');
+    var acts = Hub.el('div', 'acts');
     var repo = repoOf(game);
 
-    var setUp = Hub.el('button', 'btn btn--sm' + (game.status === 'draft' ? ' btn--go' : ''),
+    var setUp = Hub.el('button', 'btn btn--sm' + (game.status === 'draft' ? '' : ' btn--grey'),
       game.status === 'draft' ? 'Set up & publish' : 'Edit');
     setUp.type = 'button';
     setUp.addEventListener('click', function () { openForm(game); });
     acts.appendChild(setUp);
 
-    var play = Hub.el('a', 'btn btn--sm', game.status === 'draft' ? 'Test' : 'Play');
+    var play = Hub.el('a', 'btn btn--grey btn--sm', game.status === 'draft' ? 'Test' : 'Open');
     play.href = '/play.html?g=' + encodeURIComponent(game.id);
     acts.appendChild(play);
 
     if (game.status !== 'draft') {
-      var un = Hub.el('button', 'btn btn--sm', 'Unpublish');
+      var un = Hub.el('button', 'btn btn--grey btn--sm', 'Unpublish');
       un.type = 'button';
       un.addEventListener('click', function () {
         un.disabled = true;
@@ -112,7 +118,7 @@
       acts.appendChild(un);
     }
 
-    var rm = Hub.el('button', 'btn btn--sm btn--plain', 'Remove');
+    var rm = Hub.el('button', 'btn btn--grey btn--sm', 'Remove');
     rm.type = 'button';
     rm.addEventListener('click', function () {
       rm.disabled = true;
@@ -137,18 +143,19 @@
 
     var dBox = document.getElementById('drafts');
     Hub.clear(dBox);
-    if (!drafts.length) dBox.appendChild(Hub.el('p', 'dim', 'No drafts waiting.'));
-    for (var i = 0; i < drafts.length; i++) dBox.appendChild(row(drafts[i]));
+    if (!drafts.length) dBox.appendChild(Hub.el('p', 'muted', 'No drafts waiting.'));
+    drafts.forEach(function (g) { dBox.appendChild(row(g)); });
 
     var lBox = document.getElementById('live');
     Hub.clear(lBox);
-    if (!live.length) lBox.appendChild(Hub.el('p', 'dim', 'Nothing published yet.'));
-    for (var j = 0; j < live.length; j++) lBox.appendChild(row(live[j]));
+    if (!live.length) lBox.appendChild(Hub.el('p', 'muted', 'Nothing shared yet.'));
+    live.forEach(function (g) { lBox.appendChild(row(g)); });
   }
 
   function reload(message) {
     Hub.data(true).then(function (d) {
       hub = d;
+      Hub.bar('mygames', d);
       drawMine();
       loadRepos();
       if (message) say('msg', message);
@@ -165,9 +172,11 @@
     document.getElementById('formFor').textContent = game.id;
     document.getElementById('fName').value = game.title || '';
     document.getElementById('fDesc').value = game.description || '';
+    document.getElementById('fHow').value = game.howto || '';
+    document.getElementById('fNotes').value = game.notes || '';
     var sel = document.getElementById('fCat');
     sel.value = game.category || 'freestyle';
-    if (!sel.value) sel.value = sel.options.length ? sel.options[0].value : '';
+    if (!sel.value && sel.options.length) sel.value = sel.options[0].value;
     document.getElementById('fPublish').textContent =
       game.status === 'draft' ? 'Publish' : 'Save';
     cropper.reset();
@@ -181,14 +190,15 @@
     Hub.show('form', false);
   }
 
-  async function saveMeta() {
-    var res = await Hub.post('/api/games/meta', {
+  function saveMeta() {
+    return Hub.post('/api/games/meta', {
       repo: repoOf(editing),
       title: document.getElementById('fName').value,
       description: document.getElementById('fDesc').value,
-      category: document.getElementById('fCat').value
+      category: document.getElementById('fCat').value,
+      howto: document.getElementById('fHow').value,
+      notes: document.getElementById('fNotes').value
     });
-    return res;
   }
 
   async function saveCover() {
@@ -229,7 +239,7 @@
         }
       }
       closeForm();
-      reload(publish ? 'Published. It is on the shelf now.' : 'Saved as a draft.');
+      reload(publish ? 'Published. Everyone can see it now.' : 'Saved as a draft.');
     } finally {
       btn.disabled = false;
     }
@@ -256,6 +266,14 @@
     });
   });
 
+  document.getElementById('showMe').addEventListener('change', function (ev) {
+    Hub.post('/api/me/presence', { show: ev.target.checked }).then(function (r) {
+      say('setMsg', r.ok
+        ? (r.show ? 'Others can see when you are online.' : 'You are invisible now.')
+        : (r.error || 'that did not work'), !r.ok);
+    });
+  });
+
   /* ---------- adding a repo ---------- */
 
   function loadRepos() {
@@ -265,55 +283,49 @@
       .then(function (j) {
         Hub.clear(box);
         if (!j.ok) {
-          box.appendChild(Hub.el('p', 'dim', j.error || 'GitHub did not answer.'));
+          box.appendChild(Hub.el('p', 'muted', j.error || 'GitHub did not answer.'));
           return;
         }
         if (!j.repos.length) {
-          box.appendChild(Hub.el('p', 'dim',
+          box.appendChild(Hub.el('p', 'muted',
             'No repos ready yet. Make a public repo with your game in index.html and switch GitHub Pages on.'));
           return;
         }
-        for (var i = 0; i < j.repos.length; i++) {
-          (function (r) {
-            var item = Hub.el('div', 'row-item');
-            var box2 = Hub.el('div');
-            box2.appendChild(Hub.el('div', 'name', r.repo));
-            var bits = [];
-            if (r.topic) bits.push('has the topic');
-            if (r.stars) bits.push(r.stars + ' stars');
-            if (r.updated) bits.push('updated ' + Hub.ago(r.updated));
-            box2.appendChild(Hub.el('div', 'sub', bits.join(' · ') || 'ready'));
-            item.appendChild(box2);
-            var acts = Hub.el('div', 'btn-row');
-            if (r.onHub) {
-              acts.appendChild(Hub.el('span', 'cat', 'on the hub'));
-            } else {
-              var add = Hub.el('button', 'btn btn--sm', 'Add as draft');
-              add.type = 'button';
-              add.addEventListener('click', function () {
-                add.disabled = true;
-                Hub.post('/api/games/add', { repo: r.repo }).then(function (res) {
-                  if (res.ok) reload('Added ' + res.game.id + ' as a draft.');
-                  else {
-                    say('msg', res.error, true);
-                    add.disabled = false;
-                  }
-                });
+        j.repos.forEach(function (r) {
+          var item = Hub.el('div', 'row-item');
+          var box2 = Hub.el('div');
+          box2.appendChild(Hub.el('div', 'name', r.repo));
+          var bits = [];
+          if (r.topic) bits.push('has the topic');
+          if (r.stars) bits.push(Hub.count(r.stars, 'star'));
+          if (r.updated) bits.push('updated ' + Hub.ago(r.updated));
+          box2.appendChild(Hub.el('div', 'sub', bits.join(' · ') || 'ready'));
+          item.appendChild(box2);
+          var acts = Hub.el('div', 'acts');
+          if (r.onHub) {
+            acts.appendChild(Hub.el('span', 'pill pill-live', 'added'));
+          } else {
+            var add = Hub.el('button', 'btn btn--sm', 'Add as draft');
+            add.type = 'button';
+            add.addEventListener('click', function () {
+              add.disabled = true;
+              Hub.post('/api/games/add', { repo: r.repo }).then(function (res) {
+                if (res.ok) reload('Added ' + res.game.id + ' as a draft.');
+                else {
+                  say('msg', res.error, true);
+                  add.disabled = false;
+                }
               });
-              acts.appendChild(add);
-            }
-            item.appendChild(acts);
-            box.appendChild(item);
-          }(j.repos[i]));
-        }
+            });
+            acts.appendChild(add);
+          }
+          item.appendChild(acts);
+          box.appendChild(item);
+        });
       })
       .catch(function () {
         Hub.clear(box);
-        box.appendChild(Hub.el('p', 'dim', 'Could not ask GitHub right now.'));
+        box.appendChild(Hub.el('p', 'muted', 'Could not ask GitHub right now.'));
       });
   }
-
-  document.getElementById('out').addEventListener('click', function () {
-    Hub.post('/auth/logout', {}).then(function () { location.href = '/'; });
-  });
 }());

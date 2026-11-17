@@ -3,24 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Play &mdash; Claude Hub</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
+<title>Hub</title>
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
-<div class="wrap wrap--wide">
-  <div class="play-top">
-    <div class="who">
-      <a class="btn btn--plain btn--sm" href="/">&larr; Arcade</a>
-      <h1 id="pTitle">Loading</h1>
-      <span class="m" id="pBy"></span>
+<header id="bar" class="bar"></header>
+<main id="main">
+  <div class="col">
+    <div class="game-head" id="head"></div>
+    <div class="game-body">
+      <div class="player-col">
+        <div class="stage" id="stage"></div>
+        <div class="counts" id="counts"></div>
+        <div class="stats" id="stats"></div>
+      </div>
+      <div class="side-col" id="side"></div>
     </div>
-    <div class="btn-row" id="acts"></div>
   </div>
-  <div id="holder"></div>
-  <p class="hint" id="note"></p>
-</div>
+  <div class="lower" id="lower"><div class="col lower-in" id="lowerIn"></div></div>
+</main>
+<footer id="foot"></footer>
 <script src="/assets/hub.js"></script>
 <script src="/assets/play.js"></script>
 </body>

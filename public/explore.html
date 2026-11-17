@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Explore &middot; Hub</title>
+<link rel="stylesheet" href="/assets/hub.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the games</a>
+<header id="bar" class="bar"></header>
+<main id="main" class="col" tabindex="-1">
+  <div class="tabs" id="tabs"></div>
+  <div class="toolbar">
+    <span id="found" class="muted small"></span>
+    <span class="spacer"></span>
+    <label class="small" for="sort">Sort</label>
+    <select id="sort" class="inline-field">
+      <option value="new">Newest</option>
+      <option value="loved">Most loved</option>
+      <option value="az">A&ndash;Z</option>
+    </select>
+  </div>
+  <div class="grid" id="grid"></div>
+  <p class="muted" id="empty"></p>
+</main>
+<footer id="foot"></footer>
+<script src="/assets/hub.js"></script>
+<script src="/assets/explore.js"></script>
+</body>
+</html>

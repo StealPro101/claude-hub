@@ -43,7 +43,8 @@
     return td;
   }
 
-  Hub.nav('admin', null);
+  Hub.bar('admin', null);
+  Hub.footer();
 
   function load() {
     fetch('/api/admin/state', { credentials: 'same-origin', cache: 'no-store' })
@@ -68,7 +69,7 @@
   }
 
   Hub.data().then(function (d) {
-    Hub.nav('admin', d.me);
+    Hub.bar('admin', d);
     if (!d.me) {
       nope('Sign in first — and only the Hub owner gets in here.');
       return;
@@ -103,7 +104,7 @@
     Hub.clear(gBox);
     if (!state.games.length) {
       var none = Hub.el('tr');
-      var td = Hub.el('td', 'dim', 'No member games yet.');
+      var td = Hub.el('td', 'muted', 'No member games yet.');
       td.colSpan = 4;
       none.appendChild(td);
       gBox.appendChild(none);
@@ -218,7 +219,7 @@
     Hub.clear(bBox);
     if (!state.bans.length) {
       var row = Hub.el('tr');
-      var td2 = Hub.el('td', 'dim', 'Nobody is banned.');
+      var td2 = Hub.el('td', 'muted', 'Nobody is banned.');
       td2.colSpan = 4;
       row.appendChild(td2);
       bBox.appendChild(row);
@@ -241,7 +242,7 @@
     /* log */
     var log = document.getElementById('log');
     Hub.clear(log);
-    if (!state.log.length) log.appendChild(Hub.el('div', 'dim', 'Nothing has happened yet.'));
+    if (!state.log.length) log.appendChild(Hub.el('div', 'muted', 'Nothing has happened yet.'));
     state.log.forEach(function (e) {
       var line = Hub.el('div');
       line.appendChild(Hub.el('span', '', (e.at || '').replace('T', ' ').slice(0, 16) + '  '));

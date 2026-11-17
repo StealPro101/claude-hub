@@ -165,6 +165,19 @@ export async function startDevServer(opts) {
   const state = o.state || fakeState();
   patchFetch(state, ORIGIN);
   const env = devEnv(store, ORIGIN);
+  /* a fixture can pre-fill who is playing what, so screenshots show real dots */
+  try {
+    const seed = JSON.parse(process.env.HUB_SEED_PRESENCE || '[]');
+    const beat = () => {
+      for (const row of seed) {
+        env.PRESENCE.core.beat(row.who || null, row.token || null, row.game || null);
+        if (row.visits) env.PRESENCE.core.visits.set(row.game, row.visits);
+      }
+    };
+    beat();
+    /* keep them alive, or they time out after 90 seconds mid-screenshot */
+    if (seed.length) setInterval(beat, 30000).unref();
+  } catch (e) { /* no seeded presence */ }
   const worker = await import('../worker/index.js');
 
   const server = http.createServer(async (req, res) => {

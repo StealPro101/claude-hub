@@ -1,9 +1,11 @@
 /* Carries the invite code from /join?code=XXXX into the sign-in link. */
 (function () {
   'use strict';
-  Hub.nav('signin', null);
+  Hub.bar('join', null);
+  Hub.footer();
   Hub.data().then(function (d) {
-    Hub.nav(d.me ? 'mygames' : 'signin', d.me);
+    Hub.bar('join', d);
+    Hub.beat(null);
     if (d.me) {
       var msg = document.getElementById('codeMsg');
       msg.className = 'msg ok';

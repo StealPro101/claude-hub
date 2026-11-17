@@ -118,12 +118,24 @@ wrangler.jsonc     name, vars, KV binding, assets binding, the 15 minute cron
   and the Worker checks the bytes really are a WebP, JPEG or PNG before storing them
   under `cover:<ownerId>/<repo>`. Covers are served from `/img/cover/...`, cached hard
   once published and never cached while a game is still a draft.
-- **Storage** is one KV namespace behind a small interface (`get/put/delete/list`, plus
-  `putBytes/getBytes` for cover pictures):
-  `member:<id>`, `game:<ownerId>/<repo>`, `tomb:<ownerId>/<repo>`, `ban:<id>`,
-  `house:<slug>`, `rate:cover:<id>`, `settings`, the cover bytes under
-  `cover:<owner>/<repo>`, and the Worker's own `secret:session`. `list()` never returns
-  a `secret:*` or `cover:*` key, whatever prefix it is asked for.
+- **Everything the Hub knows lives in ONE KV value**, `state`: members, games, house
+  edits, settings, bans, tombstones and the activity log. A page view is one read and
+  nothing else - no `list()` on any request path, because KV's free plan caps list
+  operations at about a thousand a day. The first request after this deploy moves the
+  old `member:*` / `game:*` / `house:*` / `ban:*` / `settings` keys into that value,
+  once, and leaves every old key exactly where it is.
+- **Who is here and how often a game was opened live in a Durable Object**, not in KV:
+  presence changes every few seconds and KV allows about a thousand writes a day. The
+  class is `Presence` in `worker/index.js`; `wrangler.jsonc` binds it as `PRESENCE` with
+  a `new_sqlite_classes` migration, which is what the free plan offers. If that binding
+  is missing or the object cannot answer, every count shows 0, everyone shows offline,
+  and nothing else changes - presence is never worth an error page.
+- **Storage** is that one KV namespace behind a small interface (`get/put/delete/list`,
+  plus `putBytes/getBytes` for cover pictures):
+  `state` (everything above), the cover bytes under `cover:<owner>/<repo>`, the
+  Worker's own `secret:session`, and a `rate:*` counter only when the Durable Object is
+  not reachable. `list()` never returns a `secret:*` or `cover:*` key, whatever prefix
+  it is asked for.
 - **A game is always played from its owner's own address**, computed as
   `https://<login>.github.io/<repo>/`. The Hub never takes a URL from anybody.
 - **Members are refreshed by numeric id** (`GET /user/<id>`), so renaming a GitHub

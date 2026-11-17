@@ -13,11 +13,14 @@ import {
   isOwnerKey, COVER_MAX_BYTES
 } from './validate.js';
 import { kvStore } from './store.js';
+import { getState, update, gameId as keyFor } from './state.js';
+import { PresenceCore, presenceClient } from './presence.js';
 import { makeGitHub, makeBudget } from './github.js';
 import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
   gamesOfMember, MAX_GAMES_PER_MEMBER, topicOf, setGameMeta, setGameStatus, maySee,
-  coverAllowance, putCover, houseGamesWithEdits, addLog, PUBLISHED, DRAFT
+  coverAllowance, putCover, houseGamesWithEdits, addLog, allowance, setLove, reportGame,
+  LOVES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT
 } from './hub.js';
 import { readSession, handleLogin, handleCallback, handleLogout } from './auth.js';
 import { isAdmin, adminState, handleAdmin } from './admin.js';
@@ -26,8 +29,8 @@ const HUB_CSP = [
   "default-src 'self'",
   /* blob: is the crop preview the publish form draws before anything is uploaded */
   "img-src 'self' https://avatars.githubusercontent.com data: blob:",
-  "style-src 'self' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "style-src 'self'",
+  "font-src 'self'",
   "script-src 'self'",
   "connect-src 'self'",
   "frame-src https://*.github.io",
@@ -238,24 +241,27 @@ async function handle(request, env, ctx) {
       const house = (await houseGamesWithEdits(env, store))
         .find((g) => g.id === 'house/' + slug);
       if (!house) return errorJson(404, 'no such house game');
-      const allow = await coverAllowance(store, 'admin');
+      const allow = await coverAllowance(env, store, 'admin');
       if (!allow.ok) return errorJson(429, 'too many pictures in one hour');
       const cover = await putCover(store, 'house', slug, buf, type);
-      const before = (await store.get('house:' + slug)) || {};
-      await store.put('house:' + slug, Object.assign({}, before, { cover: cover }));
+      await update(store, (st) => {
+        st.house[slug] = Object.assign({}, st.house[slug] || {}, { cover: cover });
+      });
       hubCache = { at: 0, body: null };
       return json({ ok: true, cover: '/img/cover/house/' + slug + '?v=' + cover.v });
     }
 
     if (!member) return errorJson(403, 'not a member');
     if (!isRepoName(repo)) return errorJson(400, 'which repo?');
-    const game = await store.get('game:' + member.id + '/' + repo);
+    const game = (await getState(store)).games[keyFor(member.id, repo)];
     if (!game) return errorJson(404, 'that game is not yours or not on the Hub');
-    const allow = await coverAllowance(store, String(member.id));
+    const allow = await coverAllowance(env, store, String(member.id));
     if (!allow.ok) return errorJson(429, 'that is a lot of pictures in one hour, try later');
     const cover = await putCover(store, String(member.id), game.repo, buf, type);
-    await store.put('game:' + member.id + '/' + game.repo,
-      Object.assign({}, game, { cover: cover }));
+    await update(store, (st) => {
+      const rec = st.games[keyFor(member.id, game.repo)];
+      if (rec) rec.cover = cover;
+    });
     hubCache = { at: 0, body: null };
     await addLog(store, { what: 'cover set', who: member.login, detail: game.id });
     return json({
@@ -263,6 +269,58 @@ async function handle(request, env, ctx) {
       cover: '/img/cover/' + member.id + '/' + encodeURIComponent(game.repo) + '?v=' + cover.v,
       left: allow.left
     });
+  }
+
+  /*
+   * Presence. A beat every 45 seconds from an open tab, and a visit when somebody
+   * actually presses Play. Signed-out players count too, by a random per-tab token, so
+   * they show up in "3 playing" but never by name. Both go to the Durable Object and
+   * never to KV, and both are allowed to fail quietly: a page with no counts is far
+   * better than an error page.
+   */
+  if (method === 'POST' && path.startsWith('/api/presence/')) {
+    if (!sameOrigin(request)) return errorJson(403, 'bad origin');
+    if (!rateLimit(ip, 'beat', 90, 60000)) return json({ ok: true });
+    const body = await readBody(request);
+    if (!body) return errorJson(400, 'send a small JSON body');
+    const store = storeOf(env);
+    const session = await readSession(request, env, store);
+    const member = session ? await getMember(store, session.id) : null;
+
+    /* only a published game counts as somewhere to be */
+    let game = null;
+    const asked = typeof body.game === 'string' ? body.game.slice(0, 150) : '';
+    if (asked) {
+      if (asked.indexOf('house/') === 0) {
+        const house = houseGames(env).find((g) => g.id === asked);
+        if (house) game = house.id;
+      } else {
+        const state = await getState(store);
+        const rec = Object.keys(state.games).map((k) => state.games[k])
+          .find((g) => g && String(g.id).toLowerCase() === asked.toLowerCase());
+        if (rec && rec.status === PUBLISHED && !rec.hidden) game = rec.id;
+      }
+    }
+
+    const token = typeof body.token === 'string' && /^[A-Za-z0-9_-]{6,40}$/.test(body.token)
+      ? body.token : null;
+    const presence = presenceClient(env);
+
+    if (path === '/api/presence/visit') {
+      if (!game) return json({ ok: true, counted: false });
+      const res = await presence.visit(game, member ? String(member.id) : 'ip:' + ip);
+      return json({ ok: true, counted: Boolean(res && res.counted) });
+    }
+    if (path === '/api/presence/leave') {
+      await presence.leave(member && !member.hidePresence ? member.id : null, token);
+      return json({ ok: true });
+    }
+    if (path !== '/api/presence/beat') return errorJson(404, 'no such endpoint');
+
+    /* a member who switched presence off is counted, never named */
+    if (member && !member.hidePresence) await presence.beat(member.id, null, game);
+    else await presence.beat(null, token || ('anon-' + ip.replace(/[^A-Za-z0-9]/g, '')), game);
+    return json({ ok: true });
   }
 
   /* everything that changes something */
@@ -307,7 +365,7 @@ async function handle(request, env, ctx) {
     if (path === '/api/games/meta' || path === '/api/games/publish' ||
       path === '/api/games/unpublish' || path === '/api/games/cover-remove') {
       if (!isRepoName(body.repo)) return errorJson(400, 'which repo?');
-      const game = await store.get('game:' + member.id + '/' + body.repo);
+      const game = (await getState(store)).games[keyFor(member.id, body.repo)];
       if (!game) return errorJson(404, 'that game is not yours or not on the Hub');
       hubCache = { at: 0, body: null };
 
@@ -319,13 +377,45 @@ async function handle(request, env, ctx) {
       }
       if (path === '/api/games/cover-remove') {
         await store.delete(coverKey(String(member.id), game.repo));
-        await store.put('game:' + member.id + '/' + game.repo,
-          Object.assign({}, game, { cover: null }));
+        await update(store, (st) => {
+          const rec = st.games[keyFor(member.id, game.repo)];
+          if (rec) rec.cover = null;
+        });
         return json({ ok: true });
       }
       const res = await setGameStatus(store, game,
         path === '/api/games/publish' ? PUBLISHED : DRAFT, member.login);
       return res.ok ? json({ ok: true, game: res.game }) : errorJson(400, res.error);
+    }
+
+    /* loving a game: one small write, members only, published games only */
+    if (path === '/api/games/love') {
+      const allow = await allowance(env, store, 'love:' + member.id, LOVES_PER_HOUR, 3600000);
+      if (!allow.ok) return errorJson(429, 'that is a lot of loving for one hour');
+      const res = await setLove(env, store, body.id, member.id, body.on !== false);
+      hubCache = { at: 0, body: null };
+      return res.ok
+        ? json({ ok: true, loves: res.loves, lovedByMe: res.lovedByMe })
+        : errorJson(400, res.error);
+    }
+
+    /* "show when I'm online" lives on the member record */
+    if (path === '/api/me/presence') {
+      const on = body.show !== false;
+      await update(store, (st) => {
+        const rec = st.members[String(member.id)];
+        if (rec) rec.hidePresence = !on;
+      });
+      hubCache = { at: 0, body: null };
+      return json({ ok: true, show: on });
+    }
+
+    /* reporting a game: a line in the owner's activity log, nothing public */
+    if (path === '/api/games/report') {
+      const allow = await allowance(env, store, 'report:' + member.id, REPORTS_PER_DAY, 86400000);
+      if (!allow.ok) return errorJson(429, 'you have reported enough for today');
+      const res = await reportGame(env, store, body.id, member.login);
+      return res.ok ? json({ ok: true }) : errorJson(404, res.error);
     }
 
     return errorJson(404, 'no such action');
@@ -342,7 +432,7 @@ async function handle(request, env, ctx) {
 
     let isDraft = false;
     if (ownerKey !== 'house') {
-      const game = await store.get('game:' + Number(ownerKey) + '/' + repo);
+      const game = (await getState(store)).games[keyFor(Number(ownerKey), repo)];
       if (!game) return new Response('no', { status: 404 });
       const session = await readSession(request, env, store);
       /* a draft's picture is as private as the draft itself */
@@ -399,5 +489,31 @@ export default {
     }
   }
 };
+
+/*
+ * The Durable Object. One instance ("hub") keeps who is here and how many times each
+ * game has been opened - things that change every few seconds and would otherwise eat
+ * the KV write budget in an evening. All the thinking is in PresenceCore so it can be
+ * tested on its own; this is only the wrapper Cloudflare asks for.
+ */
+export class Presence {
+  constructor(state, env) {
+    this.state = state;
+    this.core = new PresenceCore(state && state.storage, () => Date.now());
+  }
+
+  async fetch(request) {
+    let body = {};
+    try {
+      body = await request.json();
+    } catch (e) {
+      body = {};
+    }
+    const out = await this.core.handle(body);
+    return new Response(JSON.stringify(out || { ok: false }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
 
 export { handle, withSecurity, HUB_CSP };

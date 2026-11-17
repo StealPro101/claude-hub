@@ -11,6 +11,7 @@ export const CODE_RE = /^[A-Z0-9]{4,16}$/;
 export const MAX_TITLE = 60;
 export const MAX_DESC = 200;
 export const MAX_NAME = 60;
+export const MAX_LONG = 600;
 
 export const CATEGORIES = ['freestyle', 'arcade', 'action', 'puzzle', 'platformer', 'shooter',
   'racing', 'strategy', 'trivia', 'idle', 'horror', 'sandbox', 'sports', 'card', 'rhythm',
@@ -23,6 +24,25 @@ const ICONS = ['\u{1F3AE}', '\u{1F47E}', '\u{1F579}️', '\u{1F680}', '\u{1F40D}
 export function clean(value, max) {
   if (typeof value !== 'string') return '';
   let s = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (max && s.length > max) s = s.slice(0, max).trim();
+  return s;
+}
+
+/*
+ * Like clean(), but line breaks survive: "How to play" and "Notes and credits" are
+ * shown with white-space: pre-wrap, as plain text, never as HTML.
+ */
+export function cleanLines(value, max) {
+  if (typeof value !== 'string') return '';
+  let s = value
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .split('\n')
+    .map(function (line) { return line.trim(); })
+    .join('\n')
+    .trim();
   if (max && s.length > max) s = s.slice(0, max).trim();
   return s;
 }

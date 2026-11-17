@@ -11,7 +11,7 @@
 import { pack, unpack, cookie, parseCookies, randomToken, json, today } from './util.js';
 import { CODE_RE, isId, isLogin } from './validate.js';
 import { makeGitHub, makeBudget } from './github.js';
-import { getSettings, getMember, isBanned, memberRecord, isAdminId, addLog } from './hub.js';
+import { getSettings, getMember, isBanned, memberRecord, isAdminId, addLog, putMember } from './hub.js';
 
 export const SESSION_COOKIE = 'hub_session';
 export const STATE_COOKIE = 'hub_oauth';
@@ -179,7 +179,7 @@ export async function handleCallback(request, env, store) {
   const record = existing
     ? Object.assign({}, existing, memberRecord(user, existing.joined), { joined: existing.joined })
     : memberRecord(user, today());
-  await store.put('member:' + Number(user.id), record);
+  await putMember(store, record);
   if (!existing) {
     await addLog(store, { what: 'joined', who: user.login, detail: admin ? 'admin' : 'invite' });
   }

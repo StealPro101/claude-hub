@@ -131,21 +131,20 @@ const MEMBERS = [
 ];
 
 function build(count) {
-  const data = {};
+  const state = { v: 4, members: {}, games: {}, house: {}, bans: {}, tombs: {}, settings: null };
   const blobs = {};
-  const put = (k, v) => { data[k] = JSON.stringify(v); };
 
-  put('settings', {
+  state.settings = {
     round: { round: 3, category: 'horror', note: 'make something that makes us jump' },
     inviteRequired: true,
     inviteCode: 'FIXTURE1',
     rotation: 0,
     lastRefresh: new Date().toISOString(),
     log: [{ at: new Date().toISOString(), what: 'fixture', who: 'test', detail: count + ' games' }]
-  });
+  };
 
   for (const m of MEMBERS) {
-    put('member:' + m.id, {
+    state.members[String(m.id)] = {
       id: m.id,
       login: m.login,
       name: m.name,
@@ -153,26 +152,29 @@ function build(count) {
       bio: m.id === 7001 ? 'makes small games on the bus' : '',
       url: 'https://github.com/' + m.login,
       joined: '2026-11-0' + (MEMBERS.indexOf(m) + 1),
-      seen: '2026-11-16'
-    });
+      seen: '2026-11-16',
+      lastSeen: m.id === 7002 ? new Date(Date.now() - 3 * 3600000).toISOString() : null
+    };
   }
 
   for (let i = 0; i < count; i++) {
     const m = MEMBERS[i % MEMBERS.length];
     const n = NAMES[i % NAMES.length];
     const suffix = i >= NAMES.length ? ' ' + (Math.floor(i / NAMES.length) + 1) : '';
-    const repo = (n[0].toLowerCase().replace(/[^a-z]+/g, '-') + suffix).trim().replace(/\s+/g, '-');
-    const key = 'game:' + m.id + '/' + repo;
-    /* every fourth one has no picture, so the typographic covers get seen too */
+    const repo = (n[0] + suffix).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
     const withCover = i % 4 !== 3;
     const bytes = withCover ? coverPng(i) : null;
-    put(key, {
+    /* a few games are well loved, the rest are not - like a real little hub */
+    const loves = [7001, 7002, 9001].slice(0, (i * 7) % 4);
+    state.games[m.id + '/' + repo] = {
       id: m.login + '/' + repo,
       ownerId: m.id,
       owner: m.login,
       repo: repo,
       title: n[0] + suffix,
       description: n[2],
+      howto: i % 2 === 0 ? ['Arrows to move.', 'Space to jump.', '', 'Press P to pause.'].join('\n') : '',
+      notes: i % 3 === 0 ? ['Made in a weekend.', 'Sounds by a friend.'].join('\n') : '',
       category: n[1],
       emoji: '',
       url: 'https://' + m.login + '.github.io/' + repo + '/',
@@ -183,15 +185,16 @@ function build(count) {
       source: i % 3 === 0 ? 'topic' : 'manual',
       status: 'published',
       locked: true,
+      loves: loves,
       cover: bytes ? { v: 'fx' + i, type: 'image/png' } : null,
       hidden: false,
       featured: i === 1,
       metaAt: '2026-11-16T00:00:00Z'
-    });
+    };
     if (bytes) blobs['cover:' + m.id + '/' + repo] = { type: 'image/png', b64: bytes.toString('base64') };
   }
 
-  return { data, blobs };
+  return { data: { state: JSON.stringify(state) }, blobs: blobs, state: state };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

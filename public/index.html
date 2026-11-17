@@ -3,62 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Hub</title>
-<meta name="description" content="A small arcade. Friends make games, the games live on their own GitHub, everyone plays.">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
+<title>Hub</title>
+<meta name="description" content="A small arcade made by friends.">
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
-<a class="skip" href="#all">Skip to all games</a>
-
-<div class="wrap wrap--wide">
-  <header class="top">
-    <a class="mark" href="/">Claude Hub</a>
-    <nav id="nav" aria-label="Main"></nav>
-  </header>
-</div>
-
-<main>
-  <div class="wrap">
-    <div class="hero">
-      <h1 class="wordmark">Claude <em>Hub</em></h1>
-      <p class="under">Games our friends made. Each one lives on its maker&rsquo;s own GitHub.</p>
-    </div>
-  </div>
-
-  <section class="shelf-outer" id="shelfOuter" aria-label="Featured games">
-    <div id="shelf"></div>
-  </section>
-
-  <div class="wrap">
-    <div class="strip off" id="strip"></div>
-
-    <div class="section-head" id="all">
-      <h2>All games</h2>
-      <span class="count" id="count"></span>
-    </div>
-
-    <div class="filters">
-      <label class="skip" for="q">Search games</label>
-      <input class="search" id="q" type="search" placeholder="Search games or people" autocomplete="off">
-      <div class="chips" id="chips"></div>
-    </div>
-
-    <div class="cards" id="grid"></div>
-    <p class="dim mt" id="empty"></p>
-  </div>
-</main>
-
-<div class="wrap">
-  <footer>
-    <span>Made by friends, one round at a time.</span>
-    <span><a href="/join.html">Join the Hub</a> &nbsp; <a href="/rules.html">Rules</a></span>
-  </footer>
-</div>
-
+<a class="skip" href="#main">Skip to the games</a>
+<header id="bar" class="bar"></header>
+<main id="main" class="col" tabindex="-1"></main>
+<footer id="foot"></footer>
 <script src="/assets/hub.js"></script>
-<script src="/assets/shelf.js"></script>
-<script src="/assets/arcade.js"></script>
+<script src="/assets/home.js"></script>
 </body>
 </html>
