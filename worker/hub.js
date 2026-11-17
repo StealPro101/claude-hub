@@ -5,7 +5,8 @@
 
 import {
   clean, pretty, isLogin, isRepoName, isId, normalizeHubJson, playUrl, repoUrl,
-  safeAvatar, safeProfile, repoEligible, hasTopic, gameKey, tombKey, MAX_NAME, MAX_DESC
+  safeAvatar, safeProfile, repoEligible, hasTopic, gameKey, tombKey, SLUG_RE,
+  MAX_NAME, MAX_DESC
 } from './validate.js';
 import { putIfChanged } from './store.js';
 import { makeGitHub, makeBudget, BudgetError } from './github.js';
@@ -17,39 +18,63 @@ const REFRESH_BATCH = 4;
 const META_PER_MEMBER = 6;
 const LOG_KEEP = 50;
 
-/* The Hub's own house games. They live in public/games/<slug>/ and are served by the
-   Worker at /games/<slug>/, same origin as the Hub, so the play page links to them
-   instead of framing them. Add a folder + a line here to add another. */
-export const LEGACY_GAMES = [
+/*
+ * The Hub's own house games. They stay in games/<slug>/ in this repo, served by GitHub
+ * Pages at https://<HUB_OWNER_LOGIN>.github.io/<HUB_REPO>/games/<slug>/ - exactly where
+ * they have always been, so everyone's saved progress survives. From the Hub's side a
+ * house game is just another game on somebody's Pages site, framed like the rest.
+ * Add a folder in games/ and a line here to add another.
+ */
+export const HOUSE_GAMES = [
   {
-    id: 'hub/rare-pull',
-    owner: 'StealPro101',
-    ownerId: null,
+    slug: 'rare-pull',
     title: 'Rare Pull',
     description: 'Anime trivia climb: pull cards, answer fast, duel a friend with a challenge code.',
     category: 'trivia',
     emoji: '\u{1F3B4}',
-    url: '/games/rare-pull/',
-    repoUrl: 'https://github.com/StealPro101/claude-hub',
-    stars: 0,
-    updated: '2026-08-29T00:00:00Z',
-    legacy: true
+    updated: '2026-08-29T00:00:00Z'
   },
   {
-    id: 'hub/neon-snake',
-    owner: 'StealPro101',
-    ownerId: null,
+    slug: 'neon-snake',
     title: 'Neon Snake',
     description: 'The house snake. Simple, fast, and still unbeaten.',
     category: 'demo',
     emoji: '\u{1F40D}',
-    url: '/games/neon-snake/',
-    repoUrl: 'https://github.com/StealPro101/claude-hub',
-    stars: 0,
-    updated: '2026-08-28T00:00:00Z',
-    legacy: true
+    updated: '2026-08-28T00:00:00Z'
   }
 ];
+
+export function houseOwner(env) {
+  const login = clean(env && env.HUB_OWNER_LOGIN, 39);
+  return isLogin(login) ? login : 'StealPro101';
+}
+
+export function houseRepo(env) {
+  const repo = clean(env && env.HUB_REPO, 100);
+  return isRepoName(repo) ? repo : 'claude-hub';
+}
+
+/* The same computed-from-owner rule as every other game, one folder deeper. */
+export function houseGames(env) {
+  const owner = houseOwner(env);
+  const repo = houseRepo(env);
+  const base = playUrl(owner, repo);
+  if (!base) return [];
+  return HOUSE_GAMES.filter((g) => SLUG_RE.test(g.slug)).map((g) => ({
+    id: 'house/' + g.slug,
+    owner: owner,
+    ownerId: null,
+    title: g.title,
+    description: g.description,
+    category: g.category,
+    emoji: g.emoji,
+    url: base + 'games/' + g.slug + '/',
+    repoUrl: repoUrl(owner, repo),
+    stars: 0,
+    updated: g.updated,
+    house: true
+  }));
+}
 
 export function topicOf(env) {
   return clean(env && env.HUB_TOPIC, 50).toLowerCase() || DEFAULT_TOPIC;
@@ -278,7 +303,7 @@ export function publicGame(g) {
     stars: g.stars || 0,
     updated: g.updated || null,
     featured: Boolean(g.featured),
-    legacy: Boolean(g.legacy)
+    house: Boolean(g.house)
   };
 }
 
@@ -287,7 +312,7 @@ export async function hubPayload(env, store, session) {
   const members = await listMembers(store);
   const stored = await listGames(store);
   const visible = stored.filter((g) => !g.hidden).map(publicGame);
-  const games = visible.concat(LEGACY_GAMES.map(publicGame));
+  const games = visible.concat(houseGames(env).map(publicGame));
 
   const counts = new Map();
   for (const g of visible) {
@@ -362,21 +387,80 @@ export async function refresh(env, store, opts) {
   return summary;
 }
 
+const MISSES_BEFORE_HIDING = 3;
+
+/* The account did not answer by id. Three refreshes in a row like that and we take
+   their games out of the arcade - hidden, never deleted, so the owner decides. */
+async function markMissing(store, member, summary) {
+  const misses = (Number(member.misses) || 0) + 1;
+  const next = Object.assign({}, member, { misses: misses, gone: misses >= MISSES_BEFORE_HIDING });
+  await store.put('member:' + member.id, next);
+  summary.errors++;
+  if (misses < MISSES_BEFORE_HIDING) return;
+  let hidden = 0;
+  for (const g of await gamesOfMember(store, member.id)) {
+    if (g.hidden) continue;
+    await store.put(gameKey(member.id, g.repo), Object.assign({}, g, { hidden: true }));
+    hidden++;
+  }
+  if (hidden || misses === MISSES_BEFORE_HIDING) {
+    await addLog(store, {
+      what: 'account gone', who: 'refresh',
+      detail: member.login + ': ' + hidden + ' games hidden after ' + misses + ' tries'
+    });
+  }
+}
+
+/* A rename changes the play address, so every stored game follows the new login. */
+async function renameGames(store, ownerId, login, summary) {
+  for (const g of await gamesOfMember(store, ownerId)) {
+    const next = Object.assign({}, g, {
+      id: login + '/' + g.repo,
+      owner: login,
+      url: playUrl(login, g.repo),
+      repoUrl: repoUrl(login, g.repo)
+    });
+    if (!next.url || !next.repoUrl) continue;
+    await store.put(gameKey(ownerId, g.repo), next);
+    summary.updated++;
+  }
+}
+
 async function refreshMember(env, store, gh, budget, member, topic, roundCategory, summary) {
-  const user = await gh.getUser(member.login);
-  if (!user || Number(user.id) !== Number(member.id)) {
-    /* The login was renamed or recycled: leave everything alone for the owner to sort out. */
+  /* Always by numeric id: GitHub hands back the account's CURRENT login, so someone
+     renaming themselves just carries their games along. */
+  let user;
+  try {
+    user = await gh.getUserById(member.id);
+  } catch (e) {
+    if (e && e.status === 404) {
+      await markMissing(store, member, summary);
+      return;
+    }
+    throw e;
+  }
+  if (!user || Number(user.id) !== Number(member.id) || !isLogin(user.login)) {
     summary.errors++;
     return;
   }
+
+  const renamedFrom = member.login !== user.login ? member.login : null;
   const fresh = Object.assign({}, member, {
     login: user.login,
     name: clean(user.name, MAX_NAME) || user.login,
     avatar: safeAvatar(user.avatar_url, user.id),
     bio: clean(user.bio, MAX_DESC),
-    url: safeProfile(user.login)
+    url: safeProfile(user.login),
+    misses: 0,
+    gone: false
   });
   if (await putIfChanged(store, 'member:' + member.id, fresh)) summary.updated++;
+  if (renamedFrom) {
+    await renameGames(store, member.id, user.login, summary);
+    await addLog(store, {
+      what: 'renamed', who: 'refresh', detail: renamedFrom + ' is now ' + user.login
+    });
+  }
 
   const repos = await gh.listRepos(user.login);
   const eligible = repos.filter((r) => repoEligible(r, user.id));

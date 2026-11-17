@@ -33,11 +33,6 @@ const HUB_CSP = [
   "object-src 'none'"
 ].join('; ');
 
-/* A house game in /games/ is same-origin with the Hub, so it runs in an opaque origin:
-   no allow-same-origin, which means it cannot read the Hub's cookies or call the API
-   as the player. */
-const LEGACY_CSP = 'sandbox allow-scripts allow-forms allow-modals allow-pointer-lock';
-
 const PAGE_FOR = { '/': '/index.html', '/join': '/join.html', '/admin': '/admin.html' };
 
 /* ---------- tiny per-IP rate limit, per isolate ---------- */
@@ -66,14 +61,12 @@ function clientIp(request) {
 
 /* ---------- helpers ---------- */
 
-function withSecurity(res, pathname) {
+function withSecurity(res) {
   const h = new Headers(res.headers);
   h.set('X-Content-Type-Options', 'nosniff');
   h.set('Referrer-Policy', 'no-referrer');
   const ct = h.get('Content-Type') || '';
-  if (pathname.startsWith('/games/')) {
-    h.set('Content-Security-Policy', LEGACY_CSP);
-  } else if (ct.includes('text/html')) {
+  if (ct.includes('text/html')) {
     h.set('Content-Security-Policy', HUB_CSP);
     h.set('X-Frame-Options', 'DENY');
   }
@@ -130,9 +123,9 @@ async function handle(request, env, ctx) {
     if (!rateLimit(ip, 'auth', 20, 60000)) return errorJson(429, 'slow down a moment');
     const store = storeOf(env);
     const res = path === '/auth/login'
-      ? await handleLogin(request, env)
+      ? await handleLogin(request, env, store)
       : await handleCallback(request, env, store);
-    return withSecurity(res, path);
+    return withSecurity(res);
   }
 
   if (path === '/auth/logout') {
@@ -144,7 +137,7 @@ async function handle(request, env, ctx) {
   /* public data */
   if (path === '/api/hub' && method === 'GET') {
     const store = storeOf(env);
-    const session = await readSession(request, env);
+    const session = await readSession(request, env, store);
     const useCache = env.HUB_NO_CACHE !== '1';
     if (!session && useCache && hubCache.body && Date.now() - hubCache.at < 5000) {
       return json(hubCache.body);
@@ -155,9 +148,9 @@ async function handle(request, env, ctx) {
   }
 
   if (path === '/api/me' && method === 'GET') {
-    const session = await readSession(request, env);
-    if (!session) return json({ ok: true, me: null });
     const store = storeOf(env);
+    const session = await readSession(request, env, store);
+    if (!session) return json({ ok: true, me: null });
     const member = await getMember(store, session.id);
     return json({
       ok: true,
@@ -174,10 +167,10 @@ async function handle(request, env, ctx) {
 
   /* the signed-in member's own repos, for the My games page */
   if (path === '/api/my/repos' && method === 'GET') {
-    const session = await readSession(request, env);
+    const store = storeOf(env);
+    const session = await readSession(request, env, store);
     if (!session) return errorJson(401, 'sign in first');
     if (!rateLimit(ip, 'repos', 12, 60000)) return errorJson(429, 'slow down a moment');
-    const store = storeOf(env);
     const member = await getMember(store, session.id);
     if (!member) return errorJson(403, 'not a member');
     const gh = makeGitHub(env, makeBudget(4));
@@ -204,10 +197,11 @@ async function handle(request, env, ctx) {
   }
 
   if (path === '/api/admin/state' && method === 'GET') {
-    const session = await readSession(request, env);
+    const store = storeOf(env);
+    const session = await readSession(request, env, store);
     if (!session) return errorJson(401, 'sign in first');
     if (!isAdmin(env, session)) return errorJson(403, 'not for you');
-    return json(await adminState(env, storeOf(env)));
+    return json(await adminState(env, store));
   }
 
   /* everything that changes something */
@@ -216,9 +210,9 @@ async function handle(request, env, ctx) {
     if (!rateLimit(ip, 'post', 30, 60000)) return errorJson(429, 'slow down a moment');
     const body = await readBody(request);
     if (!body) return errorJson(400, 'send a small JSON body');
-    const session = await readSession(request, env);
-    if (!session) return errorJson(401, 'sign in first');
     const store = storeOf(env);
+    const session = await readSession(request, env, store);
+    if (!session) return errorJson(401, 'sign in first');
 
     if (path.startsWith('/api/admin/')) {
       if (!isAdmin(env, session)) return errorJson(403, 'not for you');
@@ -262,7 +256,7 @@ async function handle(request, env, ctx) {
     : request;
   if (!env.ASSETS) return new Response('no assets bound', { status: 500 });
   const res = await env.ASSETS.fetch(assetReq);
-  return withSecurity(res, page || path);
+  return withSecurity(res);
 }
 
 export default {
@@ -286,4 +280,4 @@ export default {
   }
 };
 
-export { handle, withSecurity, HUB_CSP, LEGACY_CSP };
+export { handle, withSecurity, HUB_CSP };

@@ -52,10 +52,10 @@ var Hub = (function () {
     return /^[A-Za-z0-9-]{1,39}$/.test(String(login)) ? 'https://github.com/' + login : null;
   }
 
-  /* A game's play address is only ever the one the server computed from its owner. */
+  /* A game's play address is only ever the one the server computed from its owner -
+     house games included, they just live one folder deeper on the owner's Pages site. */
   function playUrl(game) {
     if (!game || typeof game.url !== 'string') return null;
-    if (game.legacy) return /^\/games\/[a-z0-9-]{1,60}\/$/.test(game.url) ? game.url : null;
     if (!/^[A-Za-z0-9-]{1,39}$/.test(String(game.owner || ''))) return null;
     var want = 'https://' + String(game.owner).toLowerCase() + '.github.io/';
     return game.url.indexOf(want) === 0 ? game.url : null;
@@ -151,7 +151,7 @@ var Hub = (function () {
     var meta = el('div', 'meta');
     meta.appendChild(el('span', 'badge', String(game.category || 'freestyle')));
     if (game.featured) meta.appendChild(el('span', 'flag', 'pick'));
-    if (game.legacy) meta.appendChild(el('span', 'badge', 'house'));
+    if (game.house) meta.appendChild(el('span', 'badge', 'house'));
     body.appendChild(meta);
 
     if (game.description) body.appendChild(el('div', 'desc', game.description));

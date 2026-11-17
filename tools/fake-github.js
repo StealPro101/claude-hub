@@ -107,11 +107,13 @@ export const FAKE_HUB_JSON = {
   }
 };
 
+/* Each world gets its own copy, so a test that renames or deletes a fake account
+   cannot leak into the next one. */
 export function fakeState(overrides) {
   return Object.assign({
-    users: FAKE_USERS,
-    repos: FAKE_REPOS,
-    hubJson: FAKE_HUB_JSON,
+    users: structuredClone(FAKE_USERS),
+    repos: structuredClone(FAKE_REPOS),
+    hubJson: structuredClone(FAKE_HUB_JSON),
     /* flip to make every API call fail, to prove nothing is lost */
     broken: false,
     calls: 0
@@ -179,7 +181,15 @@ export async function fakeGitHub(state, path, search, init) {
     return json(user);
   }
 
-  let m = path.match(/^\/api\/users\/([^/]+)\/repos$/);
+  /* by numeric id - the real API answers with the account's current login */
+  let m = path.match(/^\/api\/user\/(\d+)$/);
+  if (m) {
+    const id = Number(m[1]);
+    const found = Object.values(state.users).find((u) => Number(u.id) === id);
+    return found ? json(found) : json({ message: 'Not Found' }, 404);
+  }
+
+  m = path.match(/^\/api\/users\/([^/]+)\/repos$/);
   if (m) {
     const login = decodeURIComponent(m[1]);
     if (!state.users[login]) return json({ message: 'Not Found' }, 404);

@@ -11,6 +11,7 @@
  * pieces (see "scanner bait" below) to prove the scanner catches them. No real secret
  * is in this file.
  */
+import fs from 'node:fs';
 import { handle } from '../worker/index.js';
 import { memoryStore } from '../worker/store.js';
 import {
@@ -18,7 +19,7 @@ import {
   isOkEmoji, allowedCategory, safeAvatar
 } from '../worker/validate.js';
 import { pack } from '../worker/util.js';
-import { refresh, getSettings, saveSettings, hubPayload, LEGACY_GAMES } from '../worker/hub.js';
+import { refresh, getSettings, saveSettings, hubPayload, HOUSE_GAMES, houseGames } from '../worker/hub.js';
 import { makeBudget, makeGitHub } from '../worker/github.js';
 import { fakeState, fakeFetch, fakeEnv, FAKE_BASE, FAKE_USERS } from './fake-github.js';
 
@@ -322,9 +323,12 @@ async function testGames() {
   const hub = await call(env, '/api/hub', { cookie: session });
   const ids = hub.body.games.map((g) => g.id);
   ok('the game is in the arcade', ids.indexOf('friend-one/plain-game') >= 0, ids.join(','));
-  ok('house games are still there', ids.indexOf('hub/rare-pull') >= 0 && ids.indexOf('hub/neon-snake') >= 0);
-  const legacy = hub.body.games.find((g) => g.id === 'hub/rare-pull');
-  eq('house game keeps its old path', legacy.url, '/games/rare-pull/');
+  ok('house games are still there', ids.indexOf('house/rare-pull') >= 0 && ids.indexOf('house/neon-snake') >= 0);
+  const house = hub.body.games.find((g) => g.id === 'house/rare-pull');
+  eq('a house game plays from the old Pages address', house.url,
+    'https://stealpro101.github.io/claude-hub/games/rare-pull/');
+  eq('and is marked as a house game', house.house, true);
+  eq('owned by the hub owner', house.owner, 'StealPro101');
 
   const repos = await call(env, '/api/my/repos', { cookie: session });
   eq('my repos only lists eligible ones', repos.body.repos.length, 3);
@@ -555,7 +559,7 @@ async function testMisc() {
   const payload = await hubPayload(env, store, null);
   eq('the payload says version 3', payload.v, 3);
   eq('signed out there is no me', payload.me, null);
-  eq('house games are in the payload', payload.games.length, LEGACY_GAMES.length);
+  eq('house games are in the payload', payload.games.length, HOUSE_GAMES.length);
 
   const limited = world();
   const s = await getSettings(limited.store);
@@ -579,7 +583,165 @@ async function testMisc() {
   ok('the scanner bait looks like a token but is not one', bait.length === 40 && bait.indexOf('_') === 3);
 }
 
-/* ---------- 9. headers and static pages ---------- */
+/* ---------- 9. the Worker's own signing key ---------- */
+
+/* a brand new store object holding the same data = the Worker starting again */
+function restart(store) {
+  const next = memoryStore();
+  for (const [k, v] of store._map) next._map.set(k, v);
+  return next;
+}
+
+async function testOwnSecret() {
+  console.log('its own signing key');
+  const store = memoryStore();
+  current.state = fakeState();
+  const env = fakeEnv({ HUB_STORE: store, ASSETS: null, SESSION_SECRET: undefined });
+
+  ok('nothing is stored before the first request', (await store.get('secret:session')) === null);
+  const s = await getSettings(store, env);
+  const first = await signIn(env, 'friend-one', s.inviteCode);
+  ok('sign-in works with no SESSION_SECRET set', Boolean(first.session), 'status ' + first.status);
+  const made = await store.get('secret:session');
+  ok('the Worker made itself a key', made && typeof made.key === 'string' && made.key.length >= 32);
+
+  const second = await signIn(env, 'friend-two', s.inviteCode);
+  ok('a later sign-in still works', Boolean(second.session));
+  eq('and the key was reused, not remade', (await store.get('secret:session')).key, made.key);
+
+  const after = restart(store);
+  const env2 = fakeEnv({ HUB_STORE: after, ASSETS: null, SESSION_SECRET: undefined });
+  const me = await call(env2, '/api/me', { cookie: first.session });
+  eq('a cookie signed before a restart still verifies', me.body.me && me.body.me.login, 'friend-one');
+  eq('the restarted Worker kept the same key', (await after.get('secret:session')).key, made.key);
+
+  const forged = 'hub_session=' + await pack('a-different-key-entirely-0123456789',
+    { id: 7001, login: 'friend-one', exp: Math.floor(Date.now() / 1000) + 600 });
+  const bad = await call(env2, '/api/me', { cookie: forged });
+  ok('a cookie signed with another key is still nobody', bad.body.me === null);
+
+  /* the key must never leak out of the store */
+  ok('list() hides secret keys', (await after.list('secret:')).length === 0);
+  ok('and does not sneak them into a wider listing',
+    (await after.list('')).filter((r) => r.key.indexOf('secret:') === 0).length === 0);
+  const admin = await signIn(env2, 'sp101-admin');
+  const hub = await call(env2, '/api/hub', { cookie: admin.session });
+  const state = await call(env2, '/api/admin/state', { cookie: admin.session });
+  ok('the key is not in /api/hub', hub.text.indexOf(made.key) < 0);
+  ok('the key is not in the admin state', state.text.indexOf(made.key) < 0);
+  ok('the key is not in the activity log',
+    JSON.stringify(state.body.log || []).indexOf(made.key) < 0);
+
+  /* a key the owner sets himself still wins */
+  const mine = memoryStore();
+  const env3 = fakeEnv({ HUB_STORE: mine, ASSETS: null });
+  const s3 = await getSettings(mine, env3);
+  await signIn(env3, 'friend-one', s3.inviteCode);
+  ok('SESSION_SECRET, when set, is used and nothing is stored',
+    (await mine.get('secret:session')) === null);
+}
+
+/* ---------- 10. nothing to paste but the client secret ---------- */
+
+async function testSetupGate() {
+  console.log('setup gate');
+  const notFilled = world({ GITHUB_CLIENT_ID: 'TO_FILL_IN_GITHUB_CLIENT_ID' });
+  const r1 = await call(notFilled.env, '/auth/login');
+  eq('an unfilled client id switches sign-in off', r1.res.status, 503);
+  ok('and says so plainly', r1.text.indexOf('Not set up yet') > 0);
+  const c1 = await call(notFilled.env, '/auth/callback?code=fake-friend-one&state=x');
+  eq('the callback is off too', c1.res.status, 503);
+
+  const noSecret = world({ GITHUB_CLIENT_SECRET: '' });
+  const r2 = await call(noSecret.env, '/auth/login');
+  eq('a missing client secret switches sign-in off', r2.res.status, 503);
+
+  const ok1 = world();
+  const r3 = await call(ok1.env, '/auth/login');
+  eq('with both filled in, sign-in goes to GitHub', r3.res.status, 302);
+
+  /* ADMIN_GITHUB_IDS is a plain var now */
+  const ids = world({ ADMIN_GITHUB_IDS: '7002, 9001' });
+  const two = await signIn(ids.env, 'friend-two');
+  ok('an id listed in the var is an admin (no invite needed)', Boolean(two.session),
+    'status ' + two.status);
+  const st = await call(ids.env, '/api/admin/state', { cookie: two.session });
+  eq('and gets the panel', st.res.status, 200);
+  const notAdmin = world({ ADMIN_GITHUB_IDS: '9001' });
+  const s4 = await getSettings(notAdmin.store);
+  const f = await signIn(notAdmin.env, 'friend-two', s4.inviteCode);
+  const st2 = await call(notAdmin.env, '/api/admin/state', { cookie: f.session });
+  eq('someone not in the var is not', st2.res.status, 403);
+}
+
+/* ---------- 11. renamed and vanished accounts ---------- */
+
+function renameFakeUser(state, from, to) {
+  const user = Object.assign({}, state.users[from], { login: to });
+  delete state.users[from];
+  state.users[to] = user;
+  const repos = (state.repos[from] || []).map((r) =>
+    Object.assign({}, r, { owner: { login: to, id: user.id } }));
+  delete state.repos[from];
+  state.repos[to] = repos;
+  for (const key of Object.keys(state.hubJson)) {
+    if (key.indexOf(from + '/') === 0) {
+      state.hubJson[to + key.slice(from.length)] = state.hubJson[key];
+      delete state.hubJson[key];
+    }
+  }
+}
+
+async function testRenamedAccounts() {
+  console.log('renamed and vanished accounts');
+  const { env, store } = world();
+  const s = await getSettings(store, env);
+  await signIn(env, 'friend-one', s.inviteCode);
+  await refresh(env, store, {});
+  const before = (await store.list('game:')).map((r) => r.value);
+  ok('the member has games to start with', before.length >= 2, String(before.length));
+
+  renameFakeUser(current.state, 'friend-one', 'friend-renamed');
+  const sum = await refresh(env, store, {});
+  const member = await store.get('member:7001');
+  eq('the member keeps their id and gets the new login', member.login, 'friend-renamed');
+  eq('and is not marked gone', Boolean(member.gone), false);
+  const after = (await store.list('game:')).map((r) => r.value);
+  eq('the same games are still there', after.length, before.length);
+  ok('their ids follow the new login',
+    after.every((g) => g.id.indexOf('friend-renamed/') === 0), after.map((g) => g.id).join());
+  ok('and so do the play addresses',
+    after.every((g) => g.url.indexOf('https://friend-renamed.github.io/') === 0),
+    after.map((g) => g.url).join());
+  ok('nothing was dropped on the way', sum.removed === 0, JSON.stringify(sum));
+  const hub = await call(env, '/api/hub');
+  ok('the arcade shows the new login',
+    hub.body.games.filter((g) => g.owner === 'friend-renamed').length === after.length);
+
+  /* now the account disappears altogether */
+  delete current.state.users['friend-renamed'];
+  delete current.state.repos['friend-renamed'];
+  for (let i = 0; i < 2; i++) await refresh(env, store, {});
+  const half = (await store.list('game:')).map((r) => r.value);
+  ok('two failures change nothing yet', half.every((g) => !g.hidden), 'hidden too early');
+  eq('but the misses are counted', (await store.get('member:7001')).misses, 2);
+
+  await refresh(env, store, {});
+  const gone = (await store.list('game:')).map((r) => r.value);
+  eq('the games are still stored after the third failure', gone.length, before.length);
+  ok('but every one of them is hidden', gone.every((g) => g.hidden), 'still showing');
+  eq('and the member is flagged gone', (await store.get('member:7001')).gone, true);
+  const hub2 = await call(env, '/api/hub');
+  eq('so the arcade shows none of them',
+    hub2.body.games.filter((g) => !g.house).length, 0);
+
+  const admin = await joined('sp101-admin', env, store);
+  const state = await call(env, '/api/admin/state', { cookie: admin });
+  ok('the admin can still see them to remove them',
+    state.body.games.filter((g) => g.hidden).length === before.length);
+}
+
+/* ---------- 12. headers and static pages ---------- */
 
 async function testHeaders() {
   console.log('headers and pages');
@@ -603,14 +765,15 @@ async function testHeaders() {
   ok('including its note', String(seeded.body.round.note).indexOf('first round') > 0,
     seeded.body.round.note);
 
+  /* the house games are on GitHub Pages now, not served by the Worker at all */
   const game = await call(env, '/games/rare-pull/');
-  eq('a house game is served at its old path', game.res.status, 200);
-  const gcsp = game.res.headers.get('Content-Security-Policy') || '';
-  ok('a house game is sandboxed', gcsp.indexOf('sandbox allow-scripts') === 0, gcsp);
-  ok('and NOT given back its own origin', gcsp.indexOf('allow-same-origin') < 0, gcsp);
-
-  const snake = await call(env, '/games/neon-snake/');
-  eq('the other house game too', snake.res.status, 200);
+  eq('the Worker does not serve the house games any more', game.res.status, 404);
+  const onDisk = fs.existsSync(new URL('../games/rare-pull/index.html', import.meta.url));
+  ok('they sit in games/ at the repo root for GitHub Pages', onDisk);
+  ok('with a .nojekyll beside them', fs.existsSync(new URL('../.nojekyll', import.meta.url)));
+  const moved = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok('and the old address shows a moved page',
+    moved.indexOf('https://hub.sp101.workers.dev') > 0 && moved.indexOf('MOVED') > 0);
 
   for (const p of ['/players.html', '/play.html', '/join.html', '/rules.html', '/admin.html', '/mygames.html']) {
     const r = await call(env, p);
@@ -637,7 +800,8 @@ async function testHeaders() {
 /* ---------- run ---------- */
 
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testRefresh,
-  testBudget, testAdmin, testMisc, testHeaders];
+  testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
+  testHeaders];
 
 (async () => {
   for (const g of groups) {

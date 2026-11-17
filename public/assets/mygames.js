@@ -46,7 +46,7 @@
   function drawMine(d) {
     var low = String(me.login).toLowerCase();
     var mine = (d.games || []).filter(function (g) {
-      return !g.legacy && String(g.owner).toLowerCase() === low;
+      return !g.house && String(g.owner).toLowerCase() === low;
     });
     Hub.clear(mineBox);
     if (!mine.length) {

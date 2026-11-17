@@ -117,8 +117,10 @@ export function makeGitHub(env, budget) {
       return res.json();
     },
 
-    async getUser(login) {
-      return getJson(api + '/users/' + encodeURIComponent(login), true);
+    /* By numeric id, so a renamed account is still the same person: GitHub answers
+       with its current login. A 404 here means the account is really gone. */
+    async getUserById(id) {
+      return getJson(api + '/user/' + encodeURIComponent(String(Number(id))), true);
     },
 
     async listRepos(login) {

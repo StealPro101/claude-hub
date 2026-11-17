@@ -6,9 +6,9 @@
   // The code never hardcodes that host: it always uses the incoming request's origin,
   // so local runs and tests work the same.
   //
-  // NOTHING SECRET LIVES IN THIS FILE. Every secret is pasted into Cloudflare by the
-  // owner (see DEPLOY.md):
-  //   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SESSION_SECRET, ADMIN_GITHUB_IDS
+  // NOTHING SECRET LIVES IN THIS FILE. The values below are all public ones.
+  // The owner pastes exactly ONE secret into Cloudflare: GITHUB_CLIENT_SECRET.
+  // (The session signing key is not a setting at all - the Worker makes its own.)
   "name": "hub",
   "main": "worker/index.js",
   "compatibility_date": "2026-05-01",
@@ -36,9 +36,18 @@
     "crons": ["*/15 * * * *"]
   },
 
-  // Plain settings only - never a secret.
+  // Plain public settings - never a secret.
+  //   GITHUB_CLIENT_ID    TO FILL IN from the GitHub OAuth App (DEPLOY.md step 3).
+  //                       A client id is public; only the client secret is a secret.
+  //   ADMIN_GITHUB_IDS    numeric GitHub ids that get the admin panel, comma separated.
+  //   HUB_OWNER_LOGIN     whose Pages site serves the house games in games/<slug>/
+  //   HUB_REPO            this repo's name, used to build that address.
   "vars": {
-    "HUB_TOPIC": "claude-hub-game"
+    "HUB_TOPIC": "claude-hub-game",
+    "GITHUB_CLIENT_ID": "TO_FILL_IN_GITHUB_CLIENT_ID",
+    "ADMIN_GITHUB_IDS": "256234754",
+    "HUB_OWNER_LOGIN": "StealPro101",
+    "HUB_REPO": "claude-hub"
   },
 
   "observability": {

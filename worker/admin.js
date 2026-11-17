@@ -7,7 +7,7 @@ import { json, errorJson, nowIso, randomCode } from './util.js';
 import { clean, isId, allowedCategory, MAX_DESC } from './validate.js';
 import {
   getSettings, saveSettings, addLog, listMembers, listGames, gamesOfMember, removeGame,
-  isAdminId, refresh, LEGACY_GAMES, publicGame
+  isAdminId, refresh, houseGames, publicGame
 } from './hub.js';
 import { gameKey as keyOfGame } from './validate.js';
 
@@ -39,7 +39,7 @@ export async function adminState(env, store) {
     games: games.map((g) => Object.assign(publicGame(g), {
       hidden: Boolean(g.hidden), source: g.source, ownerId: g.ownerId, repo: g.repo
     })),
-    legacy: LEGACY_GAMES.map(publicGame),
+    house: houseGames(env).map(publicGame),
     bans: bans,
     tombs: tombs,
     log: settings.log

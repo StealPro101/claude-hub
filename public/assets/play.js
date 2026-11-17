@@ -2,9 +2,9 @@
  * The play page never builds a frame address out of the query string. It looks the id
  * up in the Hub's own data and uses the address the server computed from owner + repo.
  *
- * A member's game lives on <login>.github.io, a different origin, so it goes in a
- * sandboxed iframe. A house game in /games/ is same origin with the Hub, so it is
- * never framed with scripts - the page links straight to it instead.
+ * Every game - house games included - lives on someone's <login>.github.io, a
+ * different origin from the Hub, so it goes in a sandboxed iframe and can never reach
+ * the Hub's cookies or API.
  */
 (function () {
   'use strict';
@@ -78,20 +78,6 @@
     acts.appendChild(report);
 
     Hub.clear(holder);
-    if (game.legacy) {
-      var panel = Hub.el('div', 'panel');
-      panel.appendChild(Hub.el('h2', '', game.title || 'Untitled'));
-      panel.appendChild(Hub.el('p', 'desc', game.description || ''));
-      var go = Hub.el('a', 'btn', '▶ OPEN THE GAME');
-      go.href = url;
-      go.classList.add('mt-m');
-      panel.appendChild(go);
-      panel.appendChild(Hub.el('p', 'mini', 'House games open on their own page.'));
-      holder.appendChild(panel);
-      note.textContent = '';
-      return;
-    }
-
     var frame = document.createElement('iframe');
     frame.className = 'frame';
     frame.title = game.title || 'game';

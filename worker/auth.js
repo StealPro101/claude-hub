@@ -16,14 +16,47 @@ import { getSettings, getMember, isBanned, memberRecord, isAdminId, addLog } fro
 export const SESSION_COOKIE = 'hub_session';
 export const STATE_COOKIE = 'hub_oauth';
 const SESSION_DAYS = 30;
+export const CLIENT_ID_PLACEHOLDER = 'TO_FILL_IN_GITHUB_CLIENT_ID';
 
-function secretOf(env) {
-  const s = env && env.SESSION_SECRET;
-  return typeof s === 'string' && s.length >= 16 ? s : null;
+/* The client id is a plain var in wrangler.jsonc; only the secret is pasted into
+   Cloudflare. Until both are real, sign-in says so instead of bouncing people. */
+export function appReady(env) {
+  const id = env && env.GITHUB_CLIENT_ID;
+  const secret = env && env.GITHUB_CLIENT_SECRET;
+  return Boolean(id && id !== CLIENT_ID_PLACEHOLDER && secret);
 }
 
-export async function readSession(request, env) {
-  const secret = secretOf(env);
+/*
+ * The signing key. If the owner set SESSION_SECRET we use that; otherwise the Worker
+ * makes 32 random bytes once, keeps them in the store under secret:session and reuses
+ * them for ever - so nobody has to invent a secret, and a restart does not sign
+ * everyone out. The key is never returned by any route, never logged, and list()
+ * refuses to hand back secret:* keys at all.
+ */
+const secretCache = new WeakMap();
+
+export async function secretOf(env, store) {
+  const given = env && env.SESSION_SECRET;
+  if (typeof given === 'string' && given.length >= 16) return given;
+  if (!store) return null;
+  const cached = secretCache.get(store);
+  if (cached) return cached;
+  const saved = await store.get('secret:session');
+  if (saved && typeof saved.key === 'string' && saved.key.length >= 32) {
+    secretCache.set(store, saved.key);
+    return saved.key;
+  }
+  const made = randomToken(32);
+  await store.put('secret:session', { key: made, made: new Date().toISOString() });
+  /* Another isolate may have written first; whoever is in the store wins. */
+  const now = await store.get('secret:session');
+  const key = now && typeof now.key === 'string' ? now.key : made;
+  secretCache.set(store, key);
+  return key;
+}
+
+export async function readSession(request, env, store) {
+  const secret = await secretOf(env, store);
   if (!secret) return null;
   const token = parseCookies(request)[SESSION_COOKIE];
   if (!token) return null;
@@ -33,8 +66,8 @@ export async function readSession(request, env) {
   return { id: Number(payload.id), login: payload.login, exp: payload.exp };
 }
 
-export async function sessionCookieFor(env, user) {
-  const secret = secretOf(env);
+export async function sessionCookieFor(env, store, user) {
+  const secret = await secretOf(env, store);
   const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
   const token = await pack(secret, { id: Number(user.id), login: user.login, exp: exp });
   return cookie(SESSION_COOKIE, token, { maxAge: SESSION_DAYS * 86400, secure: env.HUB_INSECURE_COOKIES !== '1' });
@@ -64,16 +97,20 @@ function page(title, lines, status) {
   });
 }
 
-export async function handleLogin(request, env) {
-  if (!secretOf(env)) return page('Not set up yet', ['SESSION_SECRET is missing, so signing in is switched off.'], 503);
-  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
-    return page('Not set up yet', ['The GitHub app details are missing, so signing in is switched off.'], 503);
+export async function handleLogin(request, env, store) {
+  if (!appReady(env)) {
+    return page('Not set up yet', [
+      'Signing in is switched off until the GitHub app details are filled in.',
+      'The owner puts the client id in wrangler.jsonc and pastes the client secret into Cloudflare.'
+    ], 503);
   }
+  const secret = await secretOf(env, store);
+  if (!secret) return page('Not set up yet', ['The Hub has no storage bound yet.'], 503);
   const url = new URL(request.url);
   const raw = (url.searchParams.get('code') || '').trim().toUpperCase();
   const invite = CODE_RE.test(raw) ? raw : '';
   const state = randomToken(18);
-  const token = await pack(secretOf(env), {
+  const token = await pack(secret, {
     state: state, invite: invite, exp: Math.floor(Date.now() / 1000) + 600
   });
   const gh = makeGitHub(env, makeBudget(4));
@@ -86,8 +123,11 @@ export async function handleLogin(request, env) {
 }
 
 export async function handleCallback(request, env, store) {
-  const secret = secretOf(env);
-  if (!secret) return page('Not set up yet', ['SESSION_SECRET is missing.'], 503);
+  if (!appReady(env)) {
+    return page('Not set up yet', ['The GitHub app details are not filled in yet.'], 503);
+  }
+  const secret = await secretOf(env, store);
+  if (!secret) return page('Not set up yet', ['The Hub has no storage bound yet.'], 503);
   const url = new URL(request.url);
   const code = (url.searchParams.get('code') || '').trim();
   const state = (url.searchParams.get('state') || '').trim();
@@ -144,7 +184,7 @@ export async function handleCallback(request, env, store) {
     await addLog(store, { what: 'joined', who: user.login, detail: admin ? 'admin' : 'invite' });
   }
 
-  const setCookie = await sessionCookieFor(env, user);
+  const setCookie = await sessionCookieFor(env, store, user);
   const headers = new Headers();
   headers.append('Set-Cookie', setCookie);
   headers.append('Set-Cookie', clear);

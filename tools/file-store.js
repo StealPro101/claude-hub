@@ -32,7 +32,8 @@ export function fileStore(file) {
       save();
     },
     async list(prefix) {
-      return Object.keys(data).filter((k) => k.startsWith(prefix)).sort()
+      return Object.keys(data)
+        .filter((k) => k.startsWith(prefix) && !k.startsWith('secret:')).sort()
         .map((k) => ({ key: k, value: JSON.parse(data[k]) }));
     },
     reset() {

@@ -19,6 +19,11 @@ the Hub is just the front door that plays them.
 4. **The owner has an admin panel**: the round, the invite link, hide / remove / feature
    a game, remove or ban a member, refresh now, and a short activity log.
 
+The two house games (Rare Pull, Neon Snake) live in `games/` in this repo and are still
+served from `https://stealpro101.github.io/claude-hub/games/<slug>/`, exactly where they
+always were, so nobody loses their saved progress. The Hub frames them from there like
+anyone else's game.
+
 Want your Claude to do the whole thing? The JOIN page has a copy button with a ready
 prompt - [UPLOAD.md](UPLOAD.md) is the same text.
 
@@ -35,14 +40,16 @@ anyone's code, so play at your own risk.
 Everything is plain HTML, CSS and JavaScript, no build step and no dependencies.
 
 ```
-public/     the site (and the two house games at /games/<slug>/)
+public/     the site the Worker serves
+games/      the two house games, still served by GitHub Pages at their old addresses
+index.html  the "moved" page for the old Pages address
 worker/     the Cloudflare Worker: routing, GitHub sign-in, storage, the 15 min refresh
 tools/      local only: dev server with a fake GitHub, tests
 ```
 
 ```
 node tools/dev-server.js --reset    http://127.0.0.1:8797, works offline
-node tools/test.js                  171 checks, no network
+node tools/test.js                  210 checks, no network
 ```
 
 Going live, and which bits only the owner can click: [DEPLOY.md](DEPLOY.md).

@@ -9,7 +9,17 @@
  *   tomb:<ownerId>/<repo>    removed on purpose, do not auto-add again
  *   ban:<id>                 cannot sign in
  *   settings                 round, invite, activity log
+ *   secret:session           the signing key the Worker made for itself
+ *
+ * list() never returns a secret:* key, whatever prefix is asked for, so nothing that
+ * walks the store can carry the signing key into an API answer or a log line.
  */
+
+const HIDDEN = 'secret:';
+
+function visible(key) {
+  return !String(key).startsWith(HIDDEN);
+}
 
 export function kvStore(kv) {
   return {
@@ -27,7 +37,7 @@ export function kvStore(kv) {
       let cursor;
       for (let page = 0; page < 20; page++) {
         const res = await kv.list({ prefix: prefix, cursor: cursor });
-        const names = (res.keys || []).map((k) => k.name);
+        const names = (res.keys || []).map((k) => k.name).filter(visible);
         const values = await Promise.all(names.map((n) => kv.get(n, 'json')));
         for (let i = 0; i < names.length; i++) {
           if (values[i] != null) out.push({ key: names[i], value: values[i] });
@@ -58,7 +68,7 @@ export function memoryStore(initial) {
     async list(prefix) {
       const out = [];
       for (const [k, raw] of map) {
-        if (k.startsWith(prefix)) out.push({ key: k, value: JSON.parse(raw) });
+        if (k.startsWith(prefix) && visible(k)) out.push({ key: k, value: JSON.parse(raw) });
       }
       out.sort((a, b) => a.key.localeCompare(b.key));
       return out;
