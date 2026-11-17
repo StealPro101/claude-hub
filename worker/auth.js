@@ -22,7 +22,7 @@ export const CLIENT_ID_PLACEHOLDER = 'TO_FILL_IN_GITHUB_CLIENT_ID';
    Cloudflare. Until both are real, sign-in says so instead of bouncing people. */
 export function appReady(env) {
   const id = env && env.GITHUB_CLIENT_ID;
-  const secret = env && env.GITHUB_CLIENT_SECRET;
+  const secret = String((env && env.GITHUB_CLIENT_SECRET) || '').trim();
   return Boolean(id && id !== CLIENT_ID_PLACEHOLDER && secret);
 }
 

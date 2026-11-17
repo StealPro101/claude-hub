@@ -43,8 +43,9 @@ export function makeGitHub(env, budget) {
   const raw = String(env.GITHUB_RAW_BASE || 'https://raw.githubusercontent.com').replace(/\/+$/, '');
   const fake = String(env.HUB_FAKE_GITHUB || '') === '1';
   const bud = budget || makeBudget(45);
-  const clientId = env.GITHUB_CLIENT_ID || '';
-  const clientSecret = env.GITHUB_CLIENT_SECRET || '';
+  const clientId = String(env.GITHUB_CLIENT_ID || '').trim();
+  /* a pasted secret often carries a stray space or line break: never send that to GitHub */
+  const clientSecret = String(env.GITHUB_CLIENT_SECRET || '').trim();
   const credsAllowed = (api === REAL_API || fake) && clientId && clientSecret;
 
   async function call(url, init, useAppCreds) {
