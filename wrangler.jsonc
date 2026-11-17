@@ -44,7 +44,7 @@
   //   HUB_REPO            this repo's name, used to build that address.
   "vars": {
     "HUB_TOPIC": "claude-hub-game",
-    "GITHUB_CLIENT_ID": "TO_FILL_IN_GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_ID": "Ov23liRj3axxtvvt1dAN",
     "ADMIN_GITHUB_IDS": "256234754",
     "HUB_OWNER_LOGIN": "StealPro101",
     "HUB_REPO": "claude-hub"
