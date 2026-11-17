@@ -1,5 +1,10 @@
 /*
- * A game's page.
+ * A game's page, in two states.
+ *
+ * 1. The details: picture, name, maker, one big Play button, the numbers, how to play.
+ * 2. In the game: Play takes over the whole window. The site is gone, the game fills
+ *    everything, and a thin strip on top holds the one way out: Leave. The browser's
+ *    Back button leaves too.
  *
  * The frame is never built from the query string: the id is looked up in the Hub's own
  * data and the address the server computed from owner + repo is used. Nothing loads
@@ -7,15 +12,15 @@
  */
 (function () {
   'use strict';
-  var head = document.getElementById('head');
-  var stage = document.getElementById('stage');
+  var media = document.getElementById('media');
+  var info = document.getElementById('info');
   var counts = document.getElementById('counts');
-  var stats = document.getElementById('stats');
-  var side = document.getElementById('side');
+  var about = document.getElementById('about');
   var lower = document.getElementById('lower');
   var lowerIn = document.getElementById('lowerIn');
-  var heart = null;
-  var playing = false;
+  var layer = document.getElementById('ingame');
+  var inGame = false;
+  var leaveNow = null;
 
   var wanted = '';
   try {
@@ -24,16 +29,21 @@
     wanted = '';
   }
 
+  /* a reload or a shared link never drops anyone straight into a game */
+  if (location.hash === '#play') {
+    try {
+      history.replaceState(null, '', location.pathname + location.search);
+    } catch (e) { /* the hash is harmless */ }
+  }
+
   Hub.bar('explore', null);
   Hub.footer();
 
   function nope(message) {
     document.title = 'Not here · Hub';
-    Hub.clear(head);
-    Hub.clear(stage);
-    Hub.clear(counts);
-    Hub.clear(stats);
-    Hub.clear(side);
+    [media, info, counts, about].forEach(function (n) { Hub.clear(n); });
+    document.getElementById('gp').classList.add('off');
+    counts.classList.add('off');
     lower.classList.add('off');
     var box = Hub.box('Not on the Hub');
     box.body.appendChild(Hub.el('p', '', message));
@@ -42,8 +52,7 @@
     a.href = '/explore.html';
     row.appendChild(a);
     box.body.appendChild(row);
-    head.parentNode.insertBefore(box.box, head);
-    stage.classList.add('off');
+    about.appendChild(box.box);
   }
 
   if (!/^[A-Za-z0-9._\/-]{1,140}$/.test(wanted)) {
@@ -77,97 +86,50 @@
     var me = d.me;
     var members = d.members || [];
     var maker = Hub.memberOf(members, game.owner);
-    document.title = (game.title || 'Game') + ' · Hub';
+    var title = game.title || 'Untitled';
+    document.title = title + ' · Hub';
     var beat = Hub.beat(null);
 
-    /* ---- title row ---- */
-    Hub.clear(head);
+    /* ---- the picture ---- */
+    Hub.clear(media);
+    Hub.coverInto(media, game);
+
+    /* ---- name, maker, Play ---- */
+    Hub.clear(info);
+    info.appendChild(Hub.el('h1', '', title));
+
+    var by = Hub.el('div', 'gp-by');
     var av = document.createElement('img');
-    av.className = 'av';
     av.src = Hub.avatarUrl(maker && maker.avatar, maker && maker.id);
     av.alt = '';
-    head.appendChild(av);
-    var titles = Hub.el('div');
-    titles.appendChild(Hub.el('h1', '', game.title || 'Untitled'));
-    var by = Hub.el('div', 'by');
-    by.appendChild(document.createTextNode('by '));
+    by.appendChild(av);
+    by.appendChild(document.createTextNode('By '));
     var who = Hub.el('a', '', game.owner);
     who.href = '/players.html#' + encodeURIComponent(game.owner);
     by.appendChild(who);
+    info.appendChild(by);
     if (game.status === 'draft') {
-      by.appendChild(document.createTextNode(' · '));
-      by.appendChild(Hub.el('span', 'pill pill-draft', 'draft — only you can see this'));
+      info.appendChild(Hub.el('div', 'pill pill-draft gp-draft', 'Draft — only you can see this'));
     }
-    titles.appendChild(by);
-    head.appendChild(titles);
 
-    var acts = Hub.el('div', 'acts');
-    var full = Hub.el('button', 'btn btn--grey btn--sm');
-    full.type = 'button';
-    full.appendChild(Hub.icon('expand', 14));
-    full.appendChild(Hub.el('span', '', 'Full screen'));
-    full.addEventListener('click', goFull);
-    acts.appendChild(full);
-    var tab = Hub.el('a', 'btn btn--grey btn--sm', 'Open in new tab');
-    tab.href = url;
-    tab.target = '_blank';
-    tab.rel = 'noopener noreferrer';
-    acts.appendChild(tab);
-    head.appendChild(acts);
+    /* the one-line pitch sits here only when the boxes below hold something else */
+    var pitch = (game.description || '').trim();
+    if (pitch && ((game.howto || '').trim() || (game.notes || '').trim())) {
+      info.appendChild(Hub.el('p', 'gp-desc', pitch));
+    }
 
-    /* ---- the player, cold until Play is pressed ---- */
-    Hub.clear(stage);
-    var still = Hub.el('div', 'still');
-    Hub.coverInto(stage, game);
-    var veil = Hub.el('button', 'veil');
-    veil.type = 'button';
-    veil.setAttribute('aria-label', 'Play ' + (game.title || 'this game'));
-    var dot = Hub.el('span', 'play-dot');
-    dot.appendChild(Hub.icon('play', 34));
-    veil.appendChild(dot);
-    stage.appendChild(veil);
+    var play = Hub.el('button', 'gp-play');
+    play.type = 'button';
+    play.setAttribute('aria-label', 'Play ' + title);
+    play.appendChild(Hub.icon('play', 30));
+    play.appendChild(Hub.el('span', '', 'Play'));
+    info.appendChild(play);
 
-    var closeFull = Hub.el('button', 'close-full');
-    closeFull.type = 'button';
-    closeFull.setAttribute('aria-label', 'Leave full screen');
-    closeFull.appendChild(Hub.icon('close', 20));
-    closeFull.addEventListener('click', leaveFull);
-    stage.appendChild(closeFull);
+    var nowLine = Hub.el('div', 'gp-now');
+    info.appendChild(nowLine);
 
-    veil.addEventListener('click', function () {
-      if (playing) return;
-      playing = true;
-      var frame = document.createElement('iframe');
-      frame.title = game.title || 'game';
-      frame.setAttribute('sandbox',
-        'allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-popups');
-      frame.setAttribute('allow', 'fullscreen; gamepad');
-      frame.setAttribute('referrerpolicy', 'no-referrer');
-      frame.src = url;
-      Hub.clear(stage);
-      stage.appendChild(frame);
-      stage.appendChild(closeFull);
-      /* say where we are first, then count the visit, then show the fresh numbers */
-      beat.where(game.id)
-        .then(function () { return Hub.post('/api/presence/visit', { game: game.id }); })
-        .then(function () { return Hub.data(true); })
-        .then(function (fresh) {
-          var g2 = (fresh.games || []).find(function (x) { return x.id === game.id; });
-          if (g2) {
-            game.active = g2.active;
-            game.visits = g2.visits;
-            drawCounts(game);
-          }
-        })
-        .catch(function () { /* the counts are not worth a fuss */ });
-    });
-
-    /* ---- active / loves / visits ---- */
-    drawCounts(game);
-
-    /* ---- the row under it ---- */
-    Hub.clear(stats);
-    heart = Hub.el('button', 'love-btn' + (game.lovedByMe ? ' on' : ''));
+    var acts = Hub.el('div', 'gp-acts');
+    var heart = Hub.el('button', 'love-btn' + (game.lovedByMe ? ' on' : ''));
     heart.type = 'button';
     heart.appendChild(Hub.icon('heart', 18));
     heart.appendChild(Hub.el('span', 'n', String(game.loves || 0)));
@@ -192,11 +154,8 @@
         });
       });
     }
-    stats.appendChild(heart);
-    if (!me) stats.appendChild(Hub.el('span', 'small muted', 'Sign in to love this'));
+    acts.appendChild(heart);
 
-    var right = Hub.el('div', 'right');
-    right.appendChild(Hub.el('span', 'when', 'Updated ' + (Hub.niceDate(game.updated) || 'recently')));
     var copy = Hub.el('button', 'btn btn--grey btn--sm');
     copy.type = 'button';
     copy.appendChild(Hub.icon('link', 13));
@@ -210,7 +169,7 @@
         }, function () { /* the address bar still has it */ });
       }
     });
-    right.appendChild(copy);
+    acts.appendChild(copy);
 
     var report = Hub.el('button', 'btn btn--grey btn--sm');
     report.type = 'button';
@@ -223,21 +182,47 @@
       }
       report.disabled = true;
       Hub.post('/api/games/report', { id: game.id }).then(function (r) {
-        report.querySelector('span').textContent = r.ok ? 'Sent to the Hub owner' : (r.error || 'Not sent');
+        report.querySelector('span').textContent = r.ok ? 'Sent to the owner' : (r.error || 'Not sent');
       });
     });
-    right.appendChild(report);
-    stats.appendChild(right);
+    acts.appendChild(report);
+    info.appendChild(acts);
+    if (!me) info.appendChild(Hub.el('div', 'small muted gp-hint', 'Sign in to love or report a game.'));
 
-    /* ---- the two boxes on the right ---- */
-    Hub.clear(side);
+    /* ---- the numbers ---- */
+    function drawCounts(g) {
+      Hub.clear(counts);
+      [
+        ['Playing now', String(g.active || 0)],
+        ['Loves', String(g.loves || 0)],
+        ['Visits', String(g.visits || 0)],
+        ['Updated', Hub.niceDate(g.updated) || 'recently'],
+        ['Category', g.category || 'freestyle']
+      ].forEach(function (pair) {
+        var cell = Hub.el('div');
+        cell.appendChild(Hub.el('div', 'k', pair[0]));
+        cell.appendChild(Hub.el('div', 'n', pair[1]));
+        counts.appendChild(cell);
+      });
+      Hub.clear(nowLine);
+      if (g.active > 0) {
+        nowLine.appendChild(Hub.el('span', 'dot-live'));
+        nowLine.appendChild(document.createTextNode(
+          g.active + (g.active === 1 ? ' person is' : ' people are') + ' playing right now'));
+      }
+    }
+    drawCounts(game);
+
+    /* ---- how to play / notes ---- */
+    Hub.clear(about);
     var howto = (game.howto || '').trim();
     var notes = (game.notes || '').trim();
     if (!howto && !notes) {
-      side.appendChild(tinted('About this game', game.description || 'No notes yet.'));
+      about.classList.add('gp-about--one');
+      about.appendChild(tinted('About this game', game.description || 'No notes yet.'));
     } else {
-      side.appendChild(tinted('How to play', howto || 'No instructions yet.'));
-      side.appendChild(tinted('Notes and credits', notes || 'Nothing here yet.'));
+      about.appendChild(tinted('How to play', howto || 'No instructions yet.'));
+      about.appendChild(tinted('Notes and credits', notes || 'Nothing here yet.'));
     }
 
     /* ---- the band underneath ---- */
@@ -269,17 +254,131 @@
       lowerIn.appendChild(b2.box);
     }
     lower.classList.toggle('off', !any);
-  }
 
-  function drawCounts(game) {
-    Hub.clear(counts);
-    [[game.active || 0, 'Playing now'], [game.loves || 0, 'Loves'], [game.visits || 0, 'Visits']]
-      .forEach(function (pair) {
-        var cell = Hub.el('div');
-        cell.appendChild(Hub.el('div', 'n', String(pair[0])));
-        cell.appendChild(Hub.el('div', 'k', pair[1]));
-        counts.appendChild(cell);
-      });
+    /* ---- in the game: the whole window, one way out ---- */
+    Hub.clear(layer);
+    var strip = Hub.el('div', 'ig-bar');
+
+    var leave = Hub.el('button', 'ig-btn ig-leave');
+    leave.type = 'button';
+    leave.appendChild(Hub.icon('left', 16));
+    leave.appendChild(Hub.el('span', '', 'Leave'));
+    strip.appendChild(leave);
+
+    var name = Hub.el('div', 'ig-title');
+    name.appendChild(Hub.el('b', '', title));
+    name.appendChild(Hub.el('span', '', 'by ' + game.owner));
+    strip.appendChild(name);
+
+    var ask = Hub.el('div', 'ig-ask off');
+    ask.appendChild(Hub.el('span', '', 'Leave this game?'));
+    var yes = Hub.el('button', 'ig-btn ig-yes', 'Leave');
+    yes.type = 'button';
+    var no = Hub.el('button', 'ig-btn', 'Keep playing');
+    no.type = 'button';
+    ask.appendChild(yes);
+    ask.appendChild(no);
+    strip.appendChild(ask);
+
+    var full = Hub.el('button', 'ig-btn ig-full');
+    full.type = 'button';
+    full.appendChild(Hub.icon('expand', 15));
+    var fullText = Hub.el('span', '', 'Full screen');
+    full.appendChild(fullText);
+    strip.appendChild(full);
+
+    var host = Hub.el('div', 'ig-frame');
+    layer.appendChild(strip);
+    layer.appendChild(host);
+
+    function askLeave(on) {
+      ask.classList.toggle('off', !on);
+      name.classList.toggle('off', on);
+      leave.classList.toggle('off', on);
+      if (on) no.focus();
+    }
+
+    function enter() {
+      if (inGame) return;
+      inGame = true;
+      askLeave(false);
+      var frame = document.createElement('iframe');
+      frame.title = title;
+      frame.setAttribute('sandbox',
+        'allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-popups');
+      frame.setAttribute('allow', 'fullscreen; gamepad');
+      frame.setAttribute('referrerpolicy', 'no-referrer');
+      frame.src = url;
+      Hub.clear(host);
+      host.appendChild(frame);
+      layer.classList.remove('off');
+      document.documentElement.classList.add('in-game');
+      try {
+        history.pushState({ hubPlay: true }, '', location.pathname + location.search + '#play');
+      } catch (e) { /* Leave still works without the history entry */ }
+      try {
+        frame.focus();
+      } catch (e) { /* the first click in the game focuses it */ }
+      /* say where we are first, then count the visit */
+      beat.where(game.id)
+        .then(function () { return Hub.post('/api/presence/visit', { game: game.id }); })
+        .catch(function () { /* the counts are not worth a fuss */ });
+    }
+
+    function out() {
+      if (!inGame) return;
+      inGame = false;
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(function () { /* already out */ });
+      }
+      Hub.clear(host);
+      layer.classList.add('off');
+      document.documentElement.classList.remove('in-game');
+      askLeave(false);
+      play.focus();
+      beat.where(null)
+        .then(function () { return Hub.data(true); })
+        .then(function (fresh) {
+          var g2 = (fresh.games || []).find(function (x) { return x.id === game.id; });
+          if (g2) {
+            game.active = g2.active;
+            game.visits = g2.visits;
+            game.loves = g2.loves;
+            drawCounts(game);
+          }
+        })
+        .catch(function () { /* old numbers are fine */ });
+    }
+
+    /* Leave goes through the history entry Play made, so Back and Leave are one path */
+    leaveNow = function () {
+      if (history.state && history.state.hubPlay) history.back();
+      else out();
+    };
+
+    play.addEventListener('click', enter);
+    leave.addEventListener('click', function () { askLeave(true); });
+    no.addEventListener('click', function () { askLeave(false); });
+    yes.addEventListener('click', function () { leaveNow(); });
+    window.addEventListener('popstate', function () {
+      if (inGame && !(history.state && history.state.hubPlay)) out();
+    });
+
+    full.addEventListener('click', function () {
+      if (document.fullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen().catch(function () { /* fine */ });
+      } else if (layer.requestFullscreen) {
+        layer.requestFullscreen().catch(function () { /* the window is already filled */ });
+      }
+    });
+    if (!layer.requestFullscreen) full.classList.add('off');
+    document.addEventListener('fullscreenchange', function () {
+      fullText.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (!inGame || ev.key !== 'Escape' || document.fullscreenElement) return;
+      askLeave(ask.classList.contains('off'));
+    });
   }
 
   function tinted(title, text) {
@@ -289,29 +388,4 @@
     box.appendChild(body);
     return box;
   }
-
-  /* Full screen through the browser where it is allowed, and a plain fixed layer
-     where it is not. Escape or the round close button gets out either way. */
-  function goFull() {
-    if (stage.requestFullscreen) {
-      stage.requestFullscreen().catch(function () { stage.classList.add('stage-full'); });
-    } else {
-      stage.classList.add('stage-full');
-    }
-    stage.classList.add('stage-full');
-  }
-
-  function leaveFull() {
-    if (document.fullscreenElement && document.exitFullscreen) {
-      document.exitFullscreen().catch(function () { /* class is removed below anyway */ });
-    }
-    stage.classList.remove('stage-full');
-  }
-
-  document.addEventListener('fullscreenchange', function () {
-    if (!document.fullscreenElement) stage.classList.remove('stage-full');
-  });
-  document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') leaveFull();
-  });
 }());
