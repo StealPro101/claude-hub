@@ -6,10 +6,21 @@ import path from 'node:path';
 export function fileStore(file) {
   const full = path.resolve(file);
   let data = {};
+  let blobs = {};
   try {
     data = JSON.parse(fs.readFileSync(full, 'utf8'));
   } catch (e) {
     data = {};
+  }
+  try {
+    blobs = JSON.parse(fs.readFileSync(full.replace(/\.json$/, '') + '-blobs.json', 'utf8'));
+  } catch (e) {
+    blobs = {};
+  }
+
+  function saveBlobs() {
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full.replace(/\.json$/, '') + '-blobs.json', JSON.stringify(blobs));
   }
 
   function save() {
@@ -29,15 +40,31 @@ export function fileStore(file) {
     },
     async delete(key) {
       delete data[key];
+      if (blobs[key]) {
+        delete blobs[key];
+        saveBlobs();
+      }
       save();
+    },
+    async putBytes(key, bytes, type) {
+      blobs[key] = { type: type, b64: Buffer.from(bytes).toString('base64') };
+      saveBlobs();
+    },
+    async getBytes(key) {
+      const row = blobs[key];
+      if (!row) return null;
+      return { bytes: new Uint8Array(Buffer.from(row.b64, 'base64')), type: row.type };
     },
     async list(prefix) {
       return Object.keys(data)
-        .filter((k) => k.startsWith(prefix) && !k.startsWith('secret:')).sort()
+        .filter((k) => k.startsWith(prefix) && !k.startsWith('secret:') && !k.startsWith('cover:'))
+        .sort()
         .map((k) => ({ key: k, value: JSON.parse(data[k]) }));
     },
     reset() {
       data = {};
+      blobs = {};
+      saveBlobs();
       save();
     }
   };

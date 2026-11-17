@@ -7,9 +7,9 @@
     if (d.me) {
       var msg = document.getElementById('codeMsg');
       msg.className = 'msg ok';
-      msg.textContent = 'You are signed in as @' + d.me.login + '. Your games are on the MY GAMES page.';
+      msg.textContent = 'You are signed in as ' + d.me.login + '. Your games are on the My games page.';
       var btn = document.getElementById('signin');
-      btn.textContent = '🎮 MY GAMES';
+      btn.textContent = 'Go to my games';
       btn.href = '/mygames.html';
     }
   }).catch(function () { /* the page still works signed out */ });

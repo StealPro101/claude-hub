@@ -4,81 +4,111 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin &mdash; Claude Hub</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the panel</a>
-<div class="wrap">
-  <h1 class="logo">ADMIN</h1>
-  <div class="tag">&#9656; owner only &#9666;</div>
-  <nav id="nav" aria-label="Main"></nav>
 
-  <main id="main" tabindex="-1">
-    <div class="panel off" id="nope">
-      <h2>NOT FOR YOU</h2>
-      <p class="tagline" id="nopeWhy">This panel is the Hub owner&rsquo;s. Nothing here works for anyone else.</p>
-      <p class="mt-m"><a class="btn alt" href="/">back to the arcade</a></p>
+<div class="wrap wrap--wide">
+  <header class="top">
+    <a class="mark" href="/">Claude Hub</a>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+
+  <main id="main">
+    <div class="off" id="nope">
+      <h1 class="page-title">Not for you</h1>
+      <p class="under" id="nopeWhy">This panel belongs to the Hub owner.</p>
+      <p class="btn-row mt-l"><a class="btn" href="/">Back to the arcade</a></p>
     </div>
 
-    <div id="panel" class="off">
-      <div class="panel">
-        <h2>ROUND</h2>
-        <div class="rowflex">
-          <div class="f-num"><label for="rNum">number</label><input id="rNum" type="number" min="1" max="9999"></div>
-          <div class="f-mid"><label for="rCat">category</label><input id="rCat" type="text" maxlength="40"></div>
-          <div class="f-wide"><label for="rNote">note</label><input id="rNote" type="text" maxlength="200"></div>
+    <div class="off" id="panel">
+      <h1 class="page-title">Admin</h1>
+      <p class="under" id="headline"></p>
+
+      <section class="panel mt-l">
+        <h2>Round</h2>
+        <div class="panel-body form-row">
+          <span class="field"><label class="label" for="rNum">Number</label>
+            <input id="rNum" type="number" min="1" max="9999"></span>
+          <span class="field"><label class="label" for="rCat">Category</label>
+            <input id="rCat" type="text" maxlength="40"></span>
+          <span class="field field--grow"><label class="label" for="rNote">Note</label>
+            <input id="rNote" type="text" maxlength="200"></span>
+          <button class="btn btn--sm" id="rSave" type="button">Save round</button>
         </div>
-        <p class="mt-m"><button class="btn" id="rSave" type="button">SAVE ROUND</button></p>
         <p class="msg" id="rMsg"></p>
-      </div>
+      </section>
 
-      <div class="panel">
-        <h2>INVITE</h2>
-        <p class="tagline" id="invState"></p>
-        <div class="copybox">
-          <input id="invLink" type="text" readonly aria-label="Join link" class="f-link">
-          <button class="btn alt sm" id="invCopy" type="button">copy link</button>
+      <section class="panel">
+        <h2>Invite</h2>
+        <p class="under" id="invState"></p>
+        <div class="panel-body btn-row">
+          <input id="invLink" type="text" readonly aria-label="Join link">
+          <button class="btn btn--sm" id="invCopy" type="button">Copy link</button>
+          <button class="btn btn--sm" id="invToggle" type="button">Toggle invite-only</button>
+          <button class="btn btn--sm" id="invNew" type="button">New code</button>
         </div>
-        <p class="item acts mt-m bare">
-          <button class="btn alt sm" id="invToggle" type="button">toggle invite-only</button>
-          <button class="btn alt sm" id="invNew" type="button">new code</button>
-        </p>
         <p class="msg" id="invMsg"></p>
-      </div>
+      </section>
 
-      <div class="panel">
-        <h2>REFRESH</h2>
-        <p class="tagline" id="refState"></p>
-        <p class="mt-m"><button class="btn" id="refNow" type="button">REFRESH NOW</button></p>
+      <section class="panel">
+        <h2>Refresh</h2>
+        <p class="under" id="refState"></p>
+        <p class="btn-row panel-body"><button class="btn btn--sm" id="refNow" type="button">Refresh now</button></p>
         <p class="msg" id="refMsg"></p>
-      </div>
+      </section>
 
-      <div class="panel">
-        <h2>MEMBERS</h2>
-        <div class="list" id="members"></div>
-        <p class="msg" id="mMsg"></p>
-      </div>
-
-      <div class="panel">
-        <h2>GAMES</h2>
-        <div class="list" id="games"></div>
+      <section class="panel">
+        <h2>Games</h2>
+        <table class="table">
+          <thead><tr><th>Game</th><th>Maker</th><th>State</th><th>Actions</th></tr></thead>
+          <tbody id="games"></tbody>
+        </table>
         <p class="msg" id="gMsg"></p>
-      </div>
+      </section>
 
-      <div class="panel">
-        <h2>BANNED</h2>
-        <div class="list" id="bans"></div>
-      </div>
+      <section class="panel">
+        <h2>House games</h2>
+        <table class="table">
+          <thead><tr><th>Game</th><th>Name</th><th>Category</th><th>Actions</th></tr></thead>
+          <tbody id="house"></tbody>
+        </table>
+        <p class="msg" id="hMsg"></p>
+      </section>
 
-      <div class="panel">
-        <h2>ACTIVITY</h2>
-        <div id="log" class="logline"></div>
-      </div>
+      <section class="panel">
+        <h2>Members</h2>
+        <table class="table">
+          <thead><tr><th>Person</th><th>Id</th><th>Joined</th><th>Actions</th></tr></thead>
+          <tbody id="members"></tbody>
+        </table>
+        <p class="msg" id="mMsg"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Banned</h2>
+        <table class="table">
+          <thead><tr><th>Person</th><th>Id</th><th>When</th><th>Actions</th></tr></thead>
+          <tbody id="bans"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Activity</h2>
+        <div class="log" id="log"></div>
+      </section>
     </div>
   </main>
 
-  <footer><a href="/">Arcade</a></footer>
+  <footer>
+    <span>Owner only.</span>
+    <span><a href="/">Arcade</a></span>
+  </footer>
 </div>
+
 <script src="/assets/hub.js"></script>
 <script src="/assets/admin.js"></script>
 </body>

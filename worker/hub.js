@@ -6,7 +6,8 @@
 import {
   clean, pretty, isLogin, isRepoName, isId, normalizeHubJson, playUrl, repoUrl,
   safeAvatar, safeProfile, repoEligible, hasTopic, gameKey, tombKey, SLUG_RE,
-  MAX_NAME, MAX_DESC
+  allowedCategory, coverKey, coverUrl, coverVersion, CATEGORIES,
+  MAX_NAME, MAX_TITLE, MAX_DESC
 } from './validate.js';
 import { putIfChanged } from './store.js';
 import { makeGitHub, makeBudget, BudgetError } from './github.js';
@@ -56,6 +57,8 @@ export function houseRepo(env) {
 
 /* The same computed-from-owner rule as every other game, one folder deeper. */
 export function houseGames(env) {
+  /* a Hub that keeps no house games of its own */
+  if (String((env && env.HUB_HOUSE_GAMES) || '').toLowerCase() === 'off') return [];
   const owner = houseOwner(env);
   const repo = houseRepo(env);
   const base = playUrl(owner, repo);
@@ -218,10 +221,38 @@ export function gameRecord(opts) {
     updated: typeof opts.updated === 'string' ? opts.updated : null,
     added: opts.added || nowIso(),
     source: opts.source === 'topic' ? 'topic' : 'manual',
+    /* Nothing is on show until its maker says so - however it got here. */
+    status: opts.status === PUBLISHED ? PUBLISHED : DRAFT,
+    /* true once a person typed the name/description/category: the refresh keeps off */
+    locked: Boolean(opts.locked),
+    cover: opts.cover || null,
     hidden: Boolean(opts.hidden),
     featured: Boolean(opts.featured),
     metaAt: nowIso()
   };
+}
+
+export const DRAFT = 'draft';
+export const PUBLISHED = 'published';
+
+/* A record with no status at all (there are none live, but still) counts as a draft. */
+export function statusOf(game) {
+  if (!game) return DRAFT;
+  if (game.house) return PUBLISHED;
+  return game.status === PUBLISHED ? PUBLISHED : DRAFT;
+}
+
+export function isPublished(game) {
+  return statusOf(game) === PUBLISHED;
+}
+
+/* Who may look at this game at all: its owner, an admin, or anyone if it is published. */
+export function maySee(env, game, session) {
+  if (!game) return false;
+  if (isPublished(game) && !game.hidden) return true;
+  if (!session) return false;
+  if (isAdminId(env, session.id)) return true;
+  return Number(game.ownerId) === Number(session.id);
 }
 
 /*
@@ -283,9 +314,65 @@ export async function removeGame(store, ownerId, repoName, by) {
   const existing = await store.get(key);
   if (!existing) return { ok: false, error: 'not on the Hub' };
   await store.delete(key);
+  /* the picture goes with it */
+  await store.delete(coverKey(String(Number(ownerId)), repoName));
   await store.put(tombKey(ownerId, repoName), { by: by === 'admin' ? 'admin' : 'member', at: nowIso() });
   await addLog(store, { what: 'game removed', who: by, detail: existing.id });
   return { ok: true };
+}
+
+/* ---------- the publish form ---------- */
+
+export async function setGameMeta(store, game, fields, roundCategory, who) {
+  const title = clean(fields.title, MAX_TITLE);
+  if (!title) return { ok: false, error: 'a name is needed' };
+  const next = Object.assign({}, game, {
+    title: title,
+    description: clean(fields.description, MAX_DESC),
+    category: allowedCategory(fields.category, roundCategory) || game.category || 'freestyle',
+    locked: true
+  });
+  await store.put(gameKey(game.ownerId, game.repo), next);
+  await addLog(store, { what: 'details set', who: who, detail: next.id });
+  return { ok: true, game: next };
+}
+
+export async function setGameStatus(store, game, status, who) {
+  const want = status === PUBLISHED ? PUBLISHED : DRAFT;
+  if (want === PUBLISHED && !clean(game.title, MAX_TITLE)) {
+    return { ok: false, error: 'give it a name first' };
+  }
+  const next = Object.assign({}, game, { status: want });
+  await store.put(gameKey(game.ownerId, game.repo), next);
+  await addLog(store, {
+    what: want === PUBLISHED ? 'published' : 'unpublished', who: who, detail: next.id
+  });
+  return { ok: true, game: next };
+}
+
+/*
+ * The cover picture. The browser has already cropped and squeezed it; here we only
+ * check that the bytes really are the picture they claim to be, and that nobody is
+ * uploading a hundred of them an hour.
+ */
+export const COVER_PER_HOUR = 12;
+
+export async function coverAllowance(store, whoKey) {
+  const key = 'rate:cover:' + whoKey;
+  const now = Date.now();
+  const row = await store.get(key);
+  if (!row || typeof row.start !== 'number' || now - row.start > 3600000) {
+    await store.put(key, { start: now, n: 1 });
+    return { ok: true, left: COVER_PER_HOUR - 1 };
+  }
+  if (row.n >= COVER_PER_HOUR) return { ok: false, left: 0 };
+  await store.put(key, { start: row.start, n: row.n + 1 });
+  return { ok: true, left: COVER_PER_HOUR - row.n - 1 };
+}
+
+export async function putCover(store, ownerKey, repo, bytes, type) {
+  await store.putBytes(coverKey(ownerKey, repo), bytes, type);
+  return { v: coverVersion(bytes), type: type };
 }
 
 /* ---------- what the pages read ---------- */
@@ -294,41 +381,77 @@ export function publicGame(g) {
   return {
     id: g.id,
     owner: g.owner,
+    repo: g.repo || null,
     title: g.title,
     description: g.description,
     category: g.category,
-    emoji: g.emoji,
     url: g.url,
     repoUrl: g.repoUrl,
     stars: g.stars || 0,
     updated: g.updated || null,
     featured: Boolean(g.featured),
-    house: Boolean(g.house)
+    house: Boolean(g.house),
+    status: statusOf(g),
+    cover: coverUrl(g.house ? 'house' : String(Number(g.ownerId)), g.repo, g.cover)
   };
+}
+
+/* The owner's own edits to a house game, which has no member to look after it. */
+export async function houseOverrides(store) {
+  const rows = await store.list('house:');
+  const out = new Map();
+  for (const r of rows) out.set(r.key.slice('house:'.length), r.value);
+  return out;
+}
+
+export async function houseGamesWithEdits(env, store) {
+  const edits = await houseOverrides(store);
+  return houseGames(env).map((g) => {
+    const e = edits.get(g.id.slice('house/'.length));
+    if (!e) return g;
+    return Object.assign({}, g, {
+      title: clean(e.title, MAX_TITLE) || g.title,
+      description: typeof e.description === 'string' ? clean(e.description, MAX_DESC) : g.description,
+      category: allowedCategory(e.category) || g.category,
+      cover: e.cover || null
+    });
+  });
 }
 
 export async function hubPayload(env, store, session) {
   const settings = await getSettings(store, env);
   const members = await listMembers(store);
   const stored = await listGames(store);
-  const visible = stored.filter((g) => !g.hidden).map(publicGame);
-  const games = visible.concat(houseGames(env).map(publicGame));
+  const house = await houseGamesWithEdits(env, store);
 
+  /* Drafts belong to their maker (so they can set them up and test them) and to the
+     Hub owner. To everybody else they do not exist at all. */
+  const mine = session ? Number(session.id) : 0;
+  const admin = Boolean(session && isAdminId(env, session.id));
+  const onShow = stored.filter((g) => !g.hidden && isPublished(g));
+  const forMe = stored.filter((g) => !isPublished(g) && (admin || Number(g.ownerId) === mine));
+  const games = onShow.concat(forMe).map(publicGame).concat(house.map(publicGame));
+
+  /* a profile counts what the world can see, never someone's drafts */
   const counts = new Map();
-  for (const g of visible) {
+  for (const g of onShow) {
     const k = g.owner.toLowerCase();
     counts.set(k, (counts.get(k) || 0) + 1);
   }
 
   games.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) ||
     String(b.updated || '').localeCompare(String(a.updated || '')) || a.id.localeCompare(b.id));
+  const roundCat = settings.round && settings.round.category;
 
   return {
     v: 3,
     built: nowIso(),
     round: settings.round,
+    categories: CATEGORIES.concat(
+      roundCat && CATEGORIES.indexOf(roundCat) < 0 ? [roundCat] : []
+    ),
     me: session ? {
-      id: session.id, login: session.login, admin: isAdminId(env, session.id)
+      id: session.id, login: session.login, admin: admin
     } : null,
     members: members.map((m) => ({
       login: m.login,
@@ -471,6 +594,7 @@ async function refreshMember(env, store, gh, budget, member, topic, roundCategor
   for (const g of mine) {
     if (!byName.has(g.repo.toLowerCase())) {
       await store.delete(gameKey(member.id, g.repo));
+      await store.delete(coverKey(String(member.id), g.repo));
       await addLog(store, { what: 'game gone', who: 'refresh', detail: g.id });
       summary.removed++;
     }
@@ -517,8 +641,16 @@ async function refreshMember(env, store, gh, budget, member, topic, roundCategor
     const next = Object.assign({}, g, gameRecord({
       owner: user.login, ownerId: user.id, repo: r.name, meta: meta,
       stars: r.stargazers_count, updated: r.pushed_at, source: g.source,
-      hidden: g.hidden, featured: g.featured, added: g.added
+      hidden: g.hidden, featured: g.featured, added: g.added,
+      status: statusOf(g), locked: g.locked, cover: g.cover
     }));
+    /* Once a person has typed the details, hub.json stops having a say. */
+    if (g.locked) {
+      next.title = g.title;
+      next.description = g.description;
+      next.category = g.category;
+      next.emoji = g.emoji;
+    }
     const before = Object.assign({}, g);
     delete before.metaAt;
     const after = Object.assign({}, next);

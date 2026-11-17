@@ -68,11 +68,12 @@ async function call(env, path, opts) {
   headers.set('CF-Connecting-IP', o.ip || nextIp());
   if (o.cookie) headers.set('Cookie', o.cookie);
   if (o.body !== undefined) headers.set('Content-Type', 'application/json');
+  if (o.raw) headers.set('Content-Type', o.rawType || 'application/octet-stream');
   if (o.origin !== null) headers.set('Origin', o.origin || SITE);
   const req = new Request(SITE + path, {
-    method: o.method || (o.body !== undefined ? 'POST' : 'GET'),
+    method: o.method || (o.body !== undefined || o.raw ? 'POST' : 'GET'),
     headers: headers,
-    body: o.body !== undefined ? JSON.stringify(o.body) : undefined
+    body: o.raw ? o.raw : (o.body !== undefined ? JSON.stringify(o.body) : undefined)
   });
   const res = await handle(req, env, { waitUntil() {} });
   let body = null;
@@ -95,6 +96,13 @@ function cookieValue(cookies, name) {
     if (c.indexOf(name + '=') === 0) return c.slice(0, c.indexOf(';') < 0 ? undefined : c.indexOf(';'));
   }
   return null;
+}
+
+/* Games arrive as drafts now; some tests only care about what the arcade shows. */
+async function publishAll(store) {
+  for (const row of await store.list('game:')) {
+    await store.put(row.key, Object.assign({}, row.value, { status: 'published' }));
+  }
 }
 
 /* Full sign-in through the fake GitHub. Returns the session cookie or the refusal. */
@@ -487,6 +495,7 @@ async function testAdmin() {
   const hub1 = await call(env, '/api/hub');
   eq('the arcade shows the new round', hub1.body.round.round, 4);
 
+  await publishAll(store);
   const target = (await store.list('game:')).map((r) => r.value)
     .find((g) => g.owner === 'friend-one');
   const hide = await call(env, '/api/admin/game/hide', { body: { id: target.id, on: true }, cookie: admin });
@@ -713,6 +722,7 @@ async function testRenamedAccounts() {
   ok('and so do the play addresses',
     after.every((g) => g.url.indexOf('https://friend-renamed.github.io/') === 0),
     after.map((g) => g.url).join());
+  await publishAll(store);
   ok('nothing was dropped on the way', sum.removed === 0, JSON.stringify(sum));
   const hub = await call(env, '/api/hub');
   ok('the arcade shows the new login',
@@ -741,7 +751,302 @@ async function testRenamedAccounts() {
     state.body.games.filter((g) => g.hidden).length === before.length);
 }
 
-/* ---------- 12. headers and static pages ---------- */
+/* ---------- 12. drafts ---------- */
+
+async function testDrafts() {
+  console.log('drafts');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  const admin = await joined('sp101-admin', env, store);
+
+  const added = await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('a game added by hand starts as a draft', added.body.game.status, 'draft');
+
+  const anon = await call(env, '/api/hub');
+  ok('a stranger sees no draft', anon.body.games.every((g) => g.id !== 'friend-one/plain-game'),
+    anon.body.games.map((g) => g.id).join());
+  ok('and no draft of anyone', anon.body.games.every((g) => g.status === 'published'));
+  const theirs = await call(env, '/api/hub', { cookie: other });
+  ok('another member sees no draft either',
+    theirs.body.games.every((g) => g.id !== 'friend-one/plain-game'));
+  const owner = await call(env, '/api/hub', { cookie: mine });
+  ok('the maker sees their own draft',
+    owner.body.games.some((g) => g.id === 'friend-one/plain-game' && g.status === 'draft'));
+  const asAdmin = await call(env, '/api/hub', { cookie: admin });
+  ok('and so does the Hub owner',
+    asAdmin.body.games.some((g) => g.id === 'friend-one/plain-game'));
+
+  const member = anon.body.members.find((m) => m.login === 'friend-one');
+  eq('a draft does not count on a profile', member.games, 0);
+
+  await refresh(env, store, {});
+  const topicGame = await store.get('game:7001/snake-dash');
+  ok('a game the topic brought in is a draft too', topicGame && topicGame.status === 'draft');
+
+  /* the publish form, then publish */
+  const noName = await call(env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: '   ', description: 'x' }, cookie: mine
+  });
+  eq('a game needs a name', noName.res.status, 400);
+  const meta = await call(env, '/api/games/meta', {
+    body: {
+      repo: 'plain-game', title: 'My First Game', description: 'a little thing I made',
+      category: 'puzzle'
+    },
+    cookie: mine
+  });
+  eq('the details can be set', meta.res.status, 200);
+  eq('the name is kept', meta.body.game.title, 'My First Game');
+  eq('and the category', meta.body.game.category, 'puzzle');
+
+  const pub = await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('publishing works', pub.res.status, 200);
+  const after = await call(env, '/api/hub');
+  ok('now a stranger can see it',
+    after.body.games.some((g) => g.id === 'friend-one/plain-game' && g.status === 'published'));
+  eq('and it counts on the profile',
+    after.body.members.find((m) => m.login === 'friend-one').games, 1);
+
+  /* the refresh must never undo what a person typed */
+  await refresh(env, store, {});
+  await refresh(env, store, {});
+  const kept = await store.get('game:7001/plain-game');
+  eq('the refresh leaves the name alone', kept.title, 'My First Game');
+  eq('and the description', kept.description, 'a little thing I made');
+  eq('and the category', kept.category, 'puzzle');
+  eq('and it stays published', kept.status, 'published');
+
+  const un = await call(env, '/api/games/unpublish', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('unpublishing works', un.res.status, 200);
+  const gone = await call(env, '/api/hub');
+  ok('and it leaves the arcade again',
+    gone.body.games.every((g) => g.id !== 'friend-one/plain-game'));
+
+  const log = JSON.stringify((await getSettings(store)).log);
+  ok('the log says it was published', log.indexOf('"published"') > 0, log.slice(0, 200));
+  ok('and unpublished', log.indexOf('"unpublished"') > 0);
+  ok('and that the details were set', log.indexOf('details set') > 0);
+
+  /* an admin can take a published game back to draft */
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  const adminUn = await call(env, '/api/admin/game/unpublish', {
+    body: { id: 'friend-one/plain-game' }, cookie: admin
+  });
+  eq('the Hub owner can unpublish', adminUn.res.status, 200);
+  eq('and it really is a draft again',
+    (await store.get('game:7001/plain-game')).status, 'draft');
+
+  const notMine = await call(env, '/api/games/publish', {
+    body: { repo: 'plain-game' }, cookie: other
+  });
+  eq('nobody can publish someone else’s game', notMine.res.status, 404);
+  ok('house games are always on show',
+    anon.body.games.filter((g) => g.house).every((g) => g.status === 'published'));
+
+  const noHouse = world({ HUB_HOUSE_GAMES: 'off' });
+  const bare = await call(noHouse.env, '/api/hub');
+  eq('a Hub with the house games switched off has none', bare.body.games.length, 0);
+}
+
+/* ---------- 13. cover pictures ---------- */
+
+/* the smallest real files of each kind, written out by hand - nothing downloaded */
+function pngBytes() {
+  return new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+    0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+    0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
+  ]);
+}
+
+function jpegBytes() {
+  const head = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01];
+  const body = new Array(40).fill(0x20);
+  return new Uint8Array(head.concat(body, [0xff, 0xd9]));
+}
+
+function webpBytes() {
+  const out = new Uint8Array(64);
+  const put = (i, s) => {
+    for (let k = 0; k < s.length; k++) out[i + k] = s.charCodeAt(k);
+  };
+  put(0, 'RIFF');
+  out[4] = 56;
+  put(8, 'WEBPVP8 ');
+  return out;
+}
+
+function gifBytes() {
+  const out = new Uint8Array(32);
+  const s = 'GIF89a';
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+function svgBytes() {
+  return new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>');
+}
+
+async function testCovers() {
+  console.log('cover pictures');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  const admin = await joined('sp101-admin', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  const upload = (opts) => call(env, '/api/games/cover?repo=plain-game', opts);
+
+  for (const [name, bytes, type] of [
+    ['png', pngBytes(), 'image/png'],
+    ['jpeg', jpegBytes(), 'image/jpeg'],
+    ['webp', webpBytes(), 'image/webp']
+  ]) {
+    const r = await upload({ raw: bytes, rawType: type, cookie: mine });
+    eq('a real ' + name + ' is accepted', r.res.status, 200);
+    ok('and comes back with its address', String(r.body.cover).indexOf('/img/cover/7001/plain-game?v=') === 0,
+      r.body.cover);
+  }
+
+  const stored = await store.get('game:7001/plain-game');
+  eq('the game remembers the type', stored.cover.type, 'image/webp');
+  ok('and a short version mark', typeof stored.cover.v === 'string' && stored.cover.v.length <= 10);
+
+  /* refusals */
+  const big = new Uint8Array(301 * 1024);
+  big.set(pngBytes(), 0);
+  eq('too big is refused', (await upload({ raw: big, rawType: 'image/png', cookie: mine })).res.status, 413);
+  eq('a png claiming to be a webp is refused',
+    (await upload({ raw: pngBytes(), rawType: 'image/webp', cookie: mine })).res.status, 400);
+  eq('an svg is refused',
+    (await upload({ raw: svgBytes(), rawType: 'image/svg+xml', cookie: mine })).res.status, 400);
+  eq('a gif is refused',
+    (await upload({ raw: gifBytes(), rawType: 'image/gif', cookie: mine })).res.status, 400);
+  eq('html dressed as a png is refused',
+    (await upload({
+      raw: new TextEncoder().encode('<html><script>alert(1)</script></html>'),
+      rawType: 'image/png', cookie: mine
+    })).res.status, 400);
+  eq('signed out is refused', (await upload({ raw: pngBytes(), rawType: 'image/png' })).res.status, 401);
+  eq('a foreign Origin is refused',
+    (await upload({ raw: pngBytes(), rawType: 'image/png', cookie: mine, origin: 'https://evil.example' })).res.status, 403);
+  eq('no Origin at all is refused',
+    (await upload({ raw: pngBytes(), rawType: 'image/png', cookie: mine, origin: null })).res.status, 403);
+  eq('somebody else’s game is refused',
+    (await upload({ raw: pngBytes(), rawType: 'image/png', cookie: other })).res.status, 404);
+  const stranger = world();
+  const notMember = await signIn(stranger.env, 'sp101-admin');
+  await stranger.store.delete('member:9001');
+  eq('someone who is not a member is refused',
+    (await call(stranger.env, '/api/games/cover?repo=plain-game', {
+      raw: pngBytes(), rawType: 'image/png', cookie: notMember.session
+    })).res.status, 403);
+
+  /* serving */
+  await upload({ raw: pngBytes(), rawType: 'image/png', cookie: mine });
+  const draftImg = await call(env, '/img/cover/7001/plain-game?v=x');
+  eq('a draft’s picture is not served to a stranger', draftImg.res.status, 404);
+  eq('nor to another member',
+    (await call(env, '/img/cover/7001/plain-game?v=x', { cookie: other })).res.status, 404);
+  const ownerImg = await call(env, '/img/cover/7001/plain-game?v=x', { cookie: mine });
+  eq('the maker can see it', ownerImg.res.status, 200);
+  eq('and it is not cached while it is a draft',
+    ownerImg.res.headers.get('Cache-Control'), 'private, no-store');
+  eq('an admin can see it too',
+    (await call(env, '/img/cover/7001/plain-game?v=x', { cookie: admin })).res.status, 200);
+
+  await call(env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine
+  });
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  const img = await call(env, '/img/cover/7001/plain-game?v=whatever');
+  eq('once published anyone can see it', img.res.status, 200);
+  eq('with the stored type', img.res.headers.get('Content-Type'), 'image/png');
+  eq('cached hard', img.res.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  eq('nosniff', img.res.headers.get('X-Content-Type-Options'), 'nosniff');
+  eq('locked down by its own CSP', img.res.headers.get('Content-Security-Policy'), "default-src 'none'");
+  eq('and same-origin only', img.res.headers.get('Cross-Origin-Resource-Policy'), 'same-origin');
+  ok('the bytes come back unchanged', img.text.length > 0);
+  eq('an unknown picture is a 404', (await call(env, '/img/cover/7001/no-such-repo?v=1')).res.status, 404);
+  eq('a made up owner is a 404', (await call(env, '/img/cover/nonsense/plain-game?v=1')).res.status, 404);
+
+  /* the store must never hand these around */
+  ok('list() never returns cover bytes',
+    (await store.list('')).every((r) => r.key.indexOf('cover:') !== 0));
+  ok('not even when asked for them',
+    (await store.list('cover:')).length === 0);
+  ok('nor the signing key', (await store.list('')).every((r) => r.key.indexOf('secret:') !== 0));
+  const hub = await call(env, '/api/hub');
+  const want = '/img/cover/7001/plain-game?v=' + (await store.get('game:7001/plain-game')).cover.v;
+  ok('the arcade gets a cover address, not bytes',
+    hub.body.games.some((g) => g.cover === want), want);
+
+  /* owner takes the picture off */
+  const off = await call(env, '/api/games/cover-remove', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('the maker can take the picture off', off.res.status, 200);
+  eq('and it is really gone', (await call(env, '/img/cover/7001/plain-game?v=1')).res.status, 404);
+  eq('the record forgets it', (await store.get('game:7001/plain-game')).cover, null);
+
+  /* admin remove-picture */
+  await upload({ raw: pngBytes(), rawType: 'image/png', cookie: mine });
+  const adminOff = await call(env, '/api/admin/game/cover-remove', {
+    body: { id: 'friend-one/plain-game' }, cookie: admin
+  });
+  eq('the Hub owner can take a picture off too', adminOff.res.status, 200);
+  eq('gone again', (await call(env, '/img/cover/7001/plain-game?v=1')).res.status, 404);
+
+  /* removing the game takes the picture with it */
+  await upload({ raw: pngBytes(), rawType: 'image/png', cookie: mine });
+  await call(env, '/api/games/remove', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('removing a game deletes its picture',
+    (await call(env, '/img/cover/7001/plain-game?v=1')).res.status, 404);
+  ok('and nothing is left in the store',
+    (await store.getBytes('cover:7001/plain-game')) === null);
+
+  /* the hourly allowance */
+  const limited = world();
+  const who = await joined('friend-one', limited.env, limited.store);
+  await call(limited.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: who });
+  let last = 0;
+  for (let i = 0; i < 13; i++) {
+    const r = await call(limited.env, '/api/games/cover?repo=plain-game', {
+      raw: pngBytes(), rawType: 'image/png', cookie: who, ip: '10.5.5.5'
+    });
+    last = r.res.status;
+    if (i < 12) ok('upload ' + (i + 1) + ' of 12 allowed', r.res.status === 200, 'status ' + r.res.status);
+  }
+  eq('the 13th picture in an hour is refused', last, 429);
+  ok('the counter lives in the store, not in memory',
+    (await limited.store.get('rate:cover:7001')).n >= 12);
+
+  /* house games: the owner only */
+  const houseByFriend = await call(env, '/api/games/cover?house=rare-pull', {
+    raw: pngBytes(), rawType: 'image/png', cookie: mine
+  });
+  eq('a member cannot touch a house game’s picture', houseByFriend.res.status, 403);
+  const houseByAdmin = await call(env, '/api/games/cover?house=rare-pull', {
+    raw: pngBytes(), rawType: 'image/png', cookie: admin
+  });
+  eq('the Hub owner can set it', houseByAdmin.res.status, 200);
+  eq('and it is served to everyone', (await call(env, '/img/cover/house/rare-pull?v=1')).res.status, 200);
+  const houseMeta = await call(env, '/api/admin/house/meta', {
+    body: { slug: 'rare-pull', title: 'Rare Pull Deluxe', description: 'the house trivia climb', category: 'trivia' },
+    cookie: admin
+  });
+  eq('the Hub owner can rename a house game', houseMeta.res.status, 200);
+  const hub2 = await call(env, '/api/hub');
+  eq('and the arcade shows the new name',
+    hub2.body.games.find((g) => g.id === 'house/rare-pull').title, 'Rare Pull Deluxe');
+  const byMember = await call(env, '/api/admin/house/meta', {
+    body: { slug: 'rare-pull', title: 'nope' }, cookie: mine
+  });
+  eq('a member cannot', byMember.res.status, 403);
+}
+
+/* ---------- 14. headers and static pages ---------- */
 
 async function testHeaders() {
   console.log('headers and pages');
@@ -781,7 +1086,7 @@ async function testHeaders() {
   }
   const join = await call(env, '/join?code=ABCD1234');
   eq('/join serves the join page', join.res.status, 200);
-  ok('with the sign-in button', join.text.indexOf('SIGN IN WITH GITHUB') > 0);
+  ok('with the sign-in button', join.text.indexOf('Sign in with GitHub') > 0);
   const adminPage = await call(env, '/admin');
   eq('/admin serves the panel page', adminPage.res.status, 200);
   const missing = await call(env, '/nothing-here');
@@ -801,7 +1106,7 @@ async function testHeaders() {
 
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
-  testHeaders];
+  testDrafts, testCovers, testHeaders];
 
 (async () => {
   for (const g of groups) {

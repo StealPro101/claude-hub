@@ -142,6 +142,58 @@ export function hasTopic(repo, topic) {
   return repoTopics(repo).includes(String(topic || '').toLowerCase());
 }
 
+/* ---------- cover pictures ---------- */
+
+export const COVER_MAX_BYTES = 300 * 1024;
+export const COVER_TYPES = ['image/webp', 'image/jpeg', 'image/png'];
+
+/*
+ * Never trust the declared Content-Type: look at the first bytes. Anything that is not
+ * really a WebP, JPEG or PNG is refused - SVG and GIF included, because an SVG is a
+ * document that can carry script and a GIF buys us nothing here.
+ */
+export function sniffImage(bytes) {
+  const b = bytes;
+  if (!b || b.length < 12) return null;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+    b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return 'image/png';
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  return null;
+}
+
+export function coverTypeOk(declared, bytes) {
+  const want = String(declared || '').split(';')[0].trim().toLowerCase();
+  if (!COVER_TYPES.includes(want)) return null;
+  const real = sniffImage(bytes);
+  return real && real === want ? real : null;
+}
+
+/* Short, stable fingerprint of the bytes - only used to bust the browser cache. */
+export function coverVersion(bytes) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < bytes.length; i++) {
+    h1 = ((h1 ^ bytes[i]) * 16777619) >>> 0;
+    if (i % 3 === 0) h2 = ((h2 + bytes[i] * (i + 1)) * 2654435761) >>> 0;
+  }
+  return (h1.toString(36) + h2.toString(36)).slice(0, 10);
+}
+
+export function isOwnerKey(v) {
+  return v === 'house' || (/^[0-9]{1,15}$/.test(String(v)) && Number(v) > 0);
+}
+
+export function coverKey(ownerKey, repo) {
+  return 'cover:' + ownerKey + '/' + repo;
+}
+
+export function coverUrl(ownerKey, repo, cover) {
+  if (!cover || !cover.v) return null;
+  return '/img/cover/' + ownerKey + '/' + encodeURIComponent(repo) + '?v=' + cover.v;
+}
+
 export function gameKey(ownerId, repo) {
   return 'game:' + Number(ownerId) + '/' + repo;
 }

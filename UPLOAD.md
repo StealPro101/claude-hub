@@ -35,8 +35,14 @@ Hard rules while you do it:
 
 ## Then
 
-The Hub notices the topic by itself within 15 minutes. You can also open **MY GAMES** on
-the Hub and press Add next to the repo.
+The Hub notices the topic by itself within 15 minutes, and you can also open **MY GAMES**
+and press Add next to the repo.
+
+Either way it arrives as a **draft**. Your repo is public on GitHub — that is how the Hub
+finds it — but on the Hub the game stays private until you publish it. On My games press
+**Set up & publish**: a name, a description, a category and a cover picture from your
+photos. The picture is cropped to 16:10 in your browser and re-drawn before it is sent,
+so where the photo was taken never leaves your phone. Then press Publish.
 
 **Not on the Hub yet?** You need the `/join?code=...` link from whoever runs it. Open the
 link, press Sign in with GitHub, done - no password and no token goes anywhere near the

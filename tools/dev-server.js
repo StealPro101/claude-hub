@@ -88,13 +88,18 @@ export function diskAssets(dir) {
 
 export function devEnv(store, origin) {
   const base = (origin || ORIGIN) + GH_PREFIX;
-  return fakeEnv({
+  /* any HUB_* from the shell wins, so a fixture run can switch things off */
+  const fromShell = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith('HUB_') && v) fromShell[k] = v;
+  }
+  return Object.assign(fakeEnv({
     HUB_STORE: store,
     ASSETS: diskAssets(PUBLIC),
     GITHUB_OAUTH_BASE: base,
     GITHUB_API_BASE: base + '/api',
     GITHUB_RAW_BASE: base + '/raw'
-  });
+  }), fromShell);
 }
 
 /* Server side GitHub calls are answered in process - no loopback, no internet. */

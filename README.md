@@ -14,10 +14,16 @@ the Hub is just the front door that plays them.
    `claude-hub-game`. The Hub plays it from `https://<your-login>.github.io/<repo>/`,
    an address it works out itself - so nothing can be put on the Hub that is not really
    on your own account.
-3. **It shows up by itself** within 15 minutes, or press Add on the MY GAMES page.
-   Optional `hub.json` in your repo root sets the title, description, category and emoji.
-4. **The owner has an admin panel**: the round, the invite link, hide / remove / feature
-   a game, remove or ban a member, refresh now, and a short activity log.
+3. **It shows up by itself** within 15 minutes, or press Add on the MY GAMES page —
+   as a **draft**. Your repo is public, because that is how the Hub finds it, but on the
+   Hub only you (and the owner) can see the game until you publish it. Optional
+   `hub.json` in your repo root pre-fills the title, description and category.
+4. **You set it up and publish**: name, description, category, and a cover picture from
+   your photos. The picture is cropped to 16:10 in your browser and re-drawn before it
+   is sent, so no location or camera data goes with it.
+5. **The owner has an admin panel**: the round, the invite link, unpublish / hide /
+   remove / feature a game, edit the house games, remove or ban a member, refresh now,
+   and a short activity log.
 
 The two house games (Rare Pull, Neon Snake) live in `games/` in this repo and are still
 served from `https://stealpro101.github.io/claude-hub/games/<slug>/`, exactly where they
@@ -49,7 +55,8 @@ tools/      local only: dev server with a fake GitHub, tests
 
 ```
 node tools/dev-server.js --reset    http://127.0.0.1:8797, works offline
-node tools/test.js                  210 checks, no network
+node tools/test.js                  302 checks, no network
+node tools/seed-fixture.js 9        fill the local store with a made-up Hub to look at
 ```
 
 Going live, and which bits only the owner can click: [DEPLOY.md](DEPLOY.md).

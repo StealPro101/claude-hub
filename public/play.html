@@ -4,22 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Play &mdash; Claude Hub</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
-<div class="playwrap">
-  <div class="playbar">
+<div class="wrap wrap--wide">
+  <div class="play-top">
     <div class="who">
-      <a class="btn alt sm" href="/">&larr; ARCADE</a>
-      <div>
-        <h2 id="pTitle">Loading&hellip;</h2>
-        <div class="mini" id="pBy"></div>
-      </div>
+      <a class="btn btn--plain btn--sm" href="/">&larr; Arcade</a>
+      <h1 id="pTitle">Loading</h1>
+      <span class="m" id="pBy"></span>
     </div>
-    <div class="item acts" id="acts"></div>
+    <div class="btn-row" id="acts"></div>
   </div>
   <div id="holder"></div>
-  <p class="mini mt-m" id="note"></p>
+  <p class="hint" id="note"></p>
 </div>
 <script src="/assets/hub.js"></script>
 <script src="/assets/play.js"></script>

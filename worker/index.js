@@ -8,22 +8,26 @@
  */
 
 import { json, errorJson, nowIso } from './util.js';
-import { isRepoName } from './validate.js';
+import {
+  isRepoName, repoEligible, hasTopic, coverKey, coverTypeOk, coverVersion,
+  isOwnerKey, COVER_MAX_BYTES
+} from './validate.js';
 import { kvStore } from './store.js';
 import { makeGitHub, makeBudget } from './github.js';
 import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
-  gamesOfMember, MAX_GAMES_PER_MEMBER
+  gamesOfMember, MAX_GAMES_PER_MEMBER, topicOf, setGameMeta, setGameStatus, maySee,
+  coverAllowance, putCover, houseGamesWithEdits, addLog, PUBLISHED, DRAFT
 } from './hub.js';
-import { repoEligible, hasTopic } from './validate.js';
-import { topicOf } from './hub.js';
 import { readSession, handleLogin, handleCallback, handleLogout } from './auth.js';
 import { isAdmin, adminState, handleAdmin } from './admin.js';
 
 const HUB_CSP = [
   "default-src 'self'",
-  "img-src 'self' https://avatars.githubusercontent.com data:",
-  "style-src 'self'",
+  /* blob: is the crop preview the publish form draws before anything is uploaded */
+  "img-src 'self' https://avatars.githubusercontent.com data: blob:",
+  "style-src 'self' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
   "script-src 'self'",
   "connect-src 'self'",
   "frame-src https://*.github.io",
@@ -204,6 +208,63 @@ async function handle(request, env, ctx) {
     return json(await adminState(env, store));
   }
 
+  /*
+   * The cover upload is the one POST that is not JSON: raw image bytes, with the type
+   * in the Content-Type header. Same session and Origin checks as everything else, and
+   * the bytes have to really be the picture they claim to be.
+   */
+  if (method === 'POST' && path === '/api/games/cover') {
+    if (!sameOrigin(request)) return errorJson(403, 'bad origin');
+    if (!rateLimit(ip, 'post', 30, 60000)) return errorJson(429, 'slow down a moment');
+    const store = storeOf(env);
+    const session = await readSession(request, env, store);
+    if (!session) return errorJson(401, 'sign in first');
+    const member = await getMember(store, session.id);
+    const admin = isAdmin(env, session);
+    const repo = url.searchParams.get('repo') || '';
+    const slug = url.searchParams.get('house') || '';
+
+    if (Number(request.headers.get('Content-Length') || '0') > COVER_MAX_BYTES) {
+      return errorJson(413, 'that picture is too big');
+    }
+    const buf = new Uint8Array(await request.arrayBuffer());
+    if (buf.length > COVER_MAX_BYTES) return errorJson(413, 'that picture is too big');
+    const type = coverTypeOk(request.headers.get('Content-Type'), buf);
+    if (!type) return errorJson(400, 'send a real WebP, JPEG or PNG picture');
+
+    /* a house game: only the Hub owner */
+    if (slug) {
+      if (!admin) return errorJson(403, 'not for you');
+      const house = (await houseGamesWithEdits(env, store))
+        .find((g) => g.id === 'house/' + slug);
+      if (!house) return errorJson(404, 'no such house game');
+      const allow = await coverAllowance(store, 'admin');
+      if (!allow.ok) return errorJson(429, 'too many pictures in one hour');
+      const cover = await putCover(store, 'house', slug, buf, type);
+      const before = (await store.get('house:' + slug)) || {};
+      await store.put('house:' + slug, Object.assign({}, before, { cover: cover }));
+      hubCache = { at: 0, body: null };
+      return json({ ok: true, cover: '/img/cover/house/' + slug + '?v=' + cover.v });
+    }
+
+    if (!member) return errorJson(403, 'not a member');
+    if (!isRepoName(repo)) return errorJson(400, 'which repo?');
+    const game = await store.get('game:' + member.id + '/' + repo);
+    if (!game) return errorJson(404, 'that game is not yours or not on the Hub');
+    const allow = await coverAllowance(store, String(member.id));
+    if (!allow.ok) return errorJson(429, 'that is a lot of pictures in one hour, try later');
+    const cover = await putCover(store, String(member.id), game.repo, buf, type);
+    await store.put('game:' + member.id + '/' + game.repo,
+      Object.assign({}, game, { cover: cover }));
+    hubCache = { at: 0, body: null };
+    await addLog(store, { what: 'cover set', who: member.login, detail: game.id });
+    return json({
+      ok: true,
+      cover: '/img/cover/' + member.id + '/' + encodeURIComponent(game.repo) + '?v=' + cover.v,
+      left: allow.left
+    });
+  }
+
   /* everything that changes something */
   if (method === 'POST' && (path.startsWith('/api/'))) {
     if (!sameOrigin(request)) return errorJson(403, 'bad origin');
@@ -242,7 +303,66 @@ async function handle(request, env, ctx) {
       return res.ok ? json({ ok: true }) : errorJson(404, res.error);
     }
 
+    /* the publish form: details, publish, unpublish, take the picture off */
+    if (path === '/api/games/meta' || path === '/api/games/publish' ||
+      path === '/api/games/unpublish' || path === '/api/games/cover-remove') {
+      if (!isRepoName(body.repo)) return errorJson(400, 'which repo?');
+      const game = await store.get('game:' + member.id + '/' + body.repo);
+      if (!game) return errorJson(404, 'that game is not yours or not on the Hub');
+      hubCache = { at: 0, body: null };
+
+      if (path === '/api/games/meta') {
+        const settings = await getSettings(store, env);
+        const res = await setGameMeta(store, game, body,
+          settings.round && settings.round.category, member.login);
+        return res.ok ? json({ ok: true, game: res.game }) : errorJson(400, res.error);
+      }
+      if (path === '/api/games/cover-remove') {
+        await store.delete(coverKey(String(member.id), game.repo));
+        await store.put('game:' + member.id + '/' + game.repo,
+          Object.assign({}, game, { cover: null }));
+        return json({ ok: true });
+      }
+      const res = await setGameStatus(store, game,
+        path === '/api/games/publish' ? PUBLISHED : DRAFT, member.login);
+      return res.ok ? json({ ok: true, game: res.game }) : errorJson(400, res.error);
+    }
+
     return errorJson(404, 'no such action');
+  }
+
+  /* the picture itself */
+  if (method === 'GET' && path.startsWith('/img/cover/')) {
+    const parts = path.slice('/img/cover/'.length).split('/');
+    if (parts.length !== 2) return new Response('no', { status: 404 });
+    const ownerKey = decodeURIComponent(parts[0]);
+    const repo = decodeURIComponent(parts[1]);
+    if (!isOwnerKey(ownerKey) || !isRepoName(repo)) return new Response('no', { status: 404 });
+    const store = storeOf(env);
+
+    let isDraft = false;
+    if (ownerKey !== 'house') {
+      const game = await store.get('game:' + Number(ownerKey) + '/' + repo);
+      if (!game) return new Response('no', { status: 404 });
+      const session = await readSession(request, env, store);
+      /* a draft's picture is as private as the draft itself */
+      if (!maySee(env, game, session)) return new Response('no', { status: 404 });
+      isDraft = game.status !== PUBLISHED;
+    }
+
+    const row = await store.getBytes(coverKey(ownerKey, repo));
+    if (!row) return new Response('no', { status: 404 });
+    return new Response(row.bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': row.type,
+        'Content-Length': String(row.bytes.length),
+        'Cache-Control': isDraft ? 'private, no-store' : 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'",
+        'Cross-Origin-Resource-Policy': 'same-origin'
+      }
+    });
   }
 
   if (path.startsWith('/api/') || path.startsWith('/auth/')) {

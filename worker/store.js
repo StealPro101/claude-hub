@@ -1,5 +1,6 @@
 /*
- * One tiny storage interface: get / put / delete / list.
+ * One tiny storage interface: get / put / delete / list, plus putBytes / getBytes for
+ * the one binary thing the Hub keeps - a game's cover picture.
  * Cloudflare KV in production, a Map in tests, a JSON file in local runs
  * (tools/file-store.js) - the Worker code never knows which.
  *
@@ -8,17 +9,39 @@
  *   game:<ownerId>/<repo>    a game
  *   tomb:<ownerId>/<repo>    removed on purpose, do not auto-add again
  *   ban:<id>                 cannot sign in
+ *   house:<slug>             the owner's edits to a house game
+ *   rate:<what>:<who>        a counter the isolate cannot be trusted to keep
  *   settings                 round, invite, activity log
  *   secret:session           the signing key the Worker made for itself
+ *   cover:<owner>/<repo>     cover picture bytes (owner is a numeric id or "house")
  *
- * list() never returns a secret:* key, whatever prefix is asked for, so nothing that
- * walks the store can carry the signing key into an API answer or a log line.
+ * list() never returns a secret:* or cover:* key, whatever prefix is asked for, so
+ * nothing that walks the store can drag the signing key or a pile of image bytes into
+ * an API answer or a log line.
  */
 
-const HIDDEN = 'secret:';
+const HIDDEN = ['secret:', 'cover:'];
 
 function visible(key) {
-  return !String(key).startsWith(HIDDEN);
+  const k = String(key);
+  for (const p of HIDDEN) if (k.startsWith(p)) return false;
+  return true;
+}
+
+function b64FromBytes(bytes) {
+  let s = '';
+  const view = new Uint8Array(bytes);
+  for (let i = 0; i < view.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, view.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
+function bytesFromB64(b64) {
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
 export function kvStore(kv) {
@@ -31,6 +54,17 @@ export function kvStore(kv) {
     },
     async delete(key) {
       await kv.delete(key);
+    },
+    async putBytes(key, bytes, type) {
+      await kv.put(key, bytes, { metadata: { type: type } });
+    },
+    async getBytes(key) {
+      const res = await kv.getWithMetadata(key, 'arrayBuffer');
+      if (!res || !res.value) return null;
+      return {
+        bytes: new Uint8Array(res.value),
+        type: (res.metadata && res.metadata.type) || 'application/octet-stream'
+      };
     },
     async list(prefix) {
       const out = [];
@@ -52,9 +86,11 @@ export function kvStore(kv) {
 
 export function memoryStore(initial) {
   const map = new Map();
+  const blobs = new Map();
   if (initial) for (const [k, v] of Object.entries(initial)) map.set(k, JSON.stringify(v));
   return {
     _map: map,
+    _blobs: blobs,
     async get(key) {
       const raw = map.get(key);
       return raw == null ? null : JSON.parse(raw);
@@ -64,6 +100,14 @@ export function memoryStore(initial) {
     },
     async delete(key) {
       map.delete(key);
+      blobs.delete(key);
+    },
+    async putBytes(key, bytes, type) {
+      blobs.set(key, { bytes: new Uint8Array(bytes), type: type });
+    },
+    async getBytes(key) {
+      const row = blobs.get(key);
+      return row ? { bytes: new Uint8Array(row.bytes), type: row.type } : null;
     },
     async list(prefix) {
       const out = [];
@@ -83,3 +127,5 @@ export async function putIfChanged(store, key, value) {
   await store.put(key, value);
   return true;
 }
+
+export { b64FromBytes, bytesFromB64 };

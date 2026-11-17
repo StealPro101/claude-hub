@@ -4,60 +4,126 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My games &mdash; Claude Hub</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Work+Sans:wght@400;500;600&amp;display=swap">
 <link rel="stylesheet" href="/assets/hub.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to your games</a>
+
 <div class="wrap">
-  <h1 class="logo">MY GAMES</h1>
-  <div class="tag">&#9656; your own account &#9666;</div>
-  <nav id="nav" aria-label="Main"></nav>
+  <header class="top">
+    <a class="mark" href="/">Claude Hub</a>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
 
-  <main id="main" tabindex="-1">
-    <div class="panel off" id="who">
-      <div class="phead">
-        <img id="meAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="" class="av-sm">
+  <main id="main">
+    <div class="off" id="signedOut">
+      <h1 class="page-title">My games</h1>
+      <p class="under">The Hub is for friends with a join link. If you have one, open it and sign in with GitHub.</p>
+      <p class="btn-row mt-l">
+        <a class="btn btn--go" href="/auth/login">Sign in with GitHub</a>
+        <a class="btn" href="/join.html">How joining works</a>
+      </p>
+    </div>
+
+    <div class="off" id="signedIn">
+      <div class="profile">
+        <img id="meAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
         <div>
-          <h2 id="meName"></h2>
-          <div class="mini" id="meLogin"></div>
+          <h1 class="page-title">My games</h1>
+          <p class="hint" id="meLogin"></p>
+          <p class="hint narrow">Your project is public on GitHub &mdash; that is how the Hub finds it.
+            On the Hub it stays private until you publish it.</p>
         </div>
-        <div class="push"><button class="btn alt sm" id="out" type="button">sign out</button></div>
+        <span class="btn-row push"><button class="btn btn--sm" id="out" type="button">Sign out</button></span>
       </div>
-    </div>
 
-    <div class="panel off" id="signedOut">
-      <h2>SIGN IN FIRST</h2>
-      <p class="tagline">The Hub is for friends with the join link. If you have one, open it and press Sign in with GitHub.</p>
-      <p class="mt-m"><a class="btn" href="/auth/login">&#128273; SIGN IN WITH GITHUB</a> <a class="btn alt" href="/join.html">how joining works</a></p>
-    </div>
+      <!-- the publish form, shown when a game is being set up -->
+      <section class="panel off" id="form">
+        <h2 id="formTitle">Set up &amp; publish</h2>
+        <p class="under" id="formFor"></p>
+        <div class="panel-body form-grid">
+          <div>
+            <div class="field">
+              <label class="label" for="fName">Name</label>
+              <input id="fName" type="text" maxlength="60" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="label" for="fDesc">Description</label>
+              <textarea id="fDesc" rows="3" maxlength="200"></textarea>
+            </div>
+            <div class="field">
+              <label class="label" for="fCat">Category</label>
+              <select id="fCat"></select>
+            </div>
+            <p class="btn-row mt-l">
+              <button class="btn btn--go" id="fPublish" type="button">Publish</button>
+              <button class="btn" id="fSave" type="button">Save as draft</button>
+              <button class="btn btn--plain" id="fClose" type="button">Close</button>
+            </p>
+            <p class="msg" id="fMsg"></p>
+          </div>
 
-    <div class="panel off" id="onHub">
-      <h2>ON THE HUB</h2>
-      <div class="list" id="mine"></div>
-      <p class="msg" id="mineMsg"></p>
-    </div>
+          <div>
+            <span class="label">Cover picture</span>
+            <div class="crop" id="crop" tabindex="0" role="img" aria-label="Cover crop. Drag or use the arrow keys to move the picture.">
+              <div class="crop-empty" id="cropEmpty">No picture yet</div>
+              <canvas id="cropCanvas" class="off" width="960" height="600"></canvas>
+            </div>
+            <label class="drop mt" id="drop">
+              Choose a picture, or drop one here
+              <input type="file" id="file" accept="image/*">
+            </label>
+            <p class="hint">Drag the picture to choose what shows. We keep only the cropped
+              960&times;600 version &mdash; not the original, and not where it was taken.</p>
+            <p class="btn-row"><button class="btn btn--sm btn--plain" id="fCoverOff" type="button">Remove picture</button></p>
+          </div>
+        </div>
+      </section>
 
-    <div class="panel off" id="pick">
-      <h2>YOUR ELIGIBLE REPOS</h2>
-      <p class="tagline">Public, yours, not a fork, not archived, GitHub Pages on. Anything with the topic
-        <span class="logline">claude-hub-game</span> is added by itself within 15 minutes.</p>
-      <div class="list" id="repos"><div class="mini">Asking GitHub&hellip;</div></div>
-    </div>
+      <section class="panel" id="draftsPanel">
+        <h2>Drafts</h2>
+        <p class="under">Only you can see these. Give one a name and a picture, then publish it.</p>
+        <div class="rows panel-body" id="drafts"></div>
+      </section>
 
-    <div class="panel off" id="lazy">
-      <h2>LET YOUR CLAUDE DO IT</h2>
-      <div class="copybox">
-        <textarea id="prompt" class="code" readonly rows="12" aria-label="Prompt for your Claude"></textarea>
-        <button class="btn" id="copy" type="button">&#128203; COPY THE PROMPT</button>
-      </div>
-      <p class="msg" id="copyMsg"></p>
+      <section class="panel" id="livePanel">
+        <h2>Published</h2>
+        <p class="under">On the shelf for everyone.</p>
+        <div class="rows panel-body" id="live"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Add a game</h2>
+        <p class="under">Your repos that can be games: public, yours, not a fork, not archived,
+          GitHub Pages switched on. Anything carrying the topic <span class="mono">claude-hub-game</span>
+          is picked up on its own within 15 minutes &mdash; as a draft.</p>
+        <div class="rows panel-body" id="repos"></div>
+        <p class="msg" id="msg"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Let your Claude do it</h2>
+        <p class="under">Paste this to your own Claude and it will make the repo for you.</p>
+        <div class="panel-body">
+          <textarea id="prompt" class="mono" readonly rows="10" aria-label="Prompt for your Claude"></textarea>
+          <p class="btn-row mt"><button class="btn" id="copy" type="button">Copy the prompt</button></p>
+          <p class="msg" id="copyMsg"></p>
+        </div>
+      </section>
     </div>
   </main>
 
-  <footer><a href="/">Arcade</a> &middot; <a href="/rules.html">Rules</a></footer>
+  <footer>
+    <span>Your games, your account.</span>
+    <span><a href="/">Arcade</a> &nbsp; <a href="/rules.html">Rules</a></span>
+  </footer>
 </div>
+
 <script src="/assets/hub.js"></script>
 <script src="/assets/prompt.js"></script>
+<script src="/assets/cover.js"></script>
 <script src="/assets/mygames.js"></script>
 </body>
 </html>

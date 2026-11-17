@@ -1,7 +1,7 @@
 /*
- * Shared front end. No inline script anywhere on the Hub (the Content-Security-Policy
- * only allows the site's own files), and nothing a member typed is ever written as
- * HTML - it goes in through textContent.
+ * Shared front end. No inline script or style anywhere on the Hub (the
+ * Content-Security-Policy allows neither), and nothing a member typed is ever written
+ * as HTML - it goes in through textContent.
  */
 var Hub = (function () {
   'use strict';
@@ -36,11 +36,9 @@ var Hub = (function () {
 
   function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
 
-  var ICONS = ['🎮', '👾', '🚀', '🧩', '🎯', '💥'];
-  function iconFor(seed) {
-    var h = 0, s = String(seed || '');
-    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    return ICONS[h % ICONS.length];
+  function show(node, on) {
+    if (typeof node === 'string') node = document.getElementById(node);
+    if (node) node.classList.toggle('off', !on);
   }
 
   function avatarUrl(url, id) {
@@ -52,13 +50,43 @@ var Hub = (function () {
     return /^[A-Za-z0-9-]{1,39}$/.test(String(login)) ? 'https://github.com/' + login : null;
   }
 
-  /* A game's play address is only ever the one the server computed from its owner -
-     house games included, they just live one folder deeper on the owner's Pages site. */
+  /* A game's play address is only ever the one the server computed from its owner. */
   function playUrl(game) {
     if (!game || typeof game.url !== 'string') return null;
     if (!/^[A-Za-z0-9-]{1,39}$/.test(String(game.owner || ''))) return null;
     var want = 'https://' + String(game.owner).toLowerCase() + '.github.io/';
     return game.url.indexOf(want) === 0 ? game.url : null;
+  }
+
+  /* Covers are served by the Hub itself and nowhere else. */
+  function coverUrl(game) {
+    var u = game && game.cover;
+    return typeof u === 'string' && /^\/img\/cover\/[A-Za-z0-9]+\/[A-Za-z0-9._-]+\?v=[A-Za-z0-9]+$/.test(u)
+      ? u : null;
+  }
+
+  function hashOf(seed) {
+    var h = 0, s = String(seed || '');
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h;
+  }
+
+  /* No picture? Set the title big on one of ten hand-picked colour pairs. */
+  function coverNode(game) {
+    var box = el('span', 'cover');
+    var url = coverUrl(game);
+    if (url) {
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      box.appendChild(img);
+      return box;
+    }
+    box.className = 'cover cover-gen gen-' + (hashOf(game && game.id) % 10 + 1);
+    box.appendChild(el('span', '', (game && game.title) || 'Untitled'));
+    return box;
   }
 
   function ago(iso) {
@@ -116,11 +144,10 @@ var Hub = (function () {
     if (!host) return;
     host.className = 'nav';
     clear(host);
-    var items = [['arcade', '/', '🕹️ ARCADE'], ['players', '/players.html', '👥 PLAYERS']];
-    if (me) items.push(['mygames', '/mygames.html', '🎮 MY GAMES']);
-    else items.push(['signin', '/auth/login', '→ SIGN IN']);
-    items.push(['rules', '/rules.html', '📜 RULES']);
-    if (me && me.admin) items.push(['admin', '/admin.html', '⚙️ ADMIN']);
+    var items = [['arcade', '/', 'Arcade'], ['players', '/players.html', 'Players']];
+    items.push(me ? ['mygames', '/mygames.html', 'My games'] : ['signin', '/auth/login', 'Sign in']);
+    items.push(['rules', '/rules.html', 'Rules']);
+    if (me && me.admin) items.push(['admin', '/admin.html', 'Admin']);
     for (var i = 0; i < items.length; i++) {
       var a = el('a', items[i][0] === active ? 'on' : '', items[i][2]);
       a.href = items[i][1];
@@ -128,78 +155,62 @@ var Hub = (function () {
     }
   }
 
-  function roundBanner(round) {
-    var b = document.getElementById('banner');
-    if (!b || !round) return;
-    var r = el('span', 'rd', 'ROUND ' + (Number(round.round) || 1));
-    var c = el('span', 'cat', String(round.category || 'freestyle').toUpperCase());
-    var n = el('span', 'note', round.note || '');
-    clear(b);
-    b.appendChild(r);
-    b.appendChild(c);
-    b.appendChild(n);
-    b.classList.remove('off');
+  function strip(round) {
+    var box = document.getElementById('strip');
+    if (!box || !round) return;
+    clear(box);
+    box.appendChild(el('span', 'n', 'Round ' + (Number(round.round) || 1)));
+    box.appendChild(el('span', 'c', String(round.category || 'freestyle')));
+    if (round.note) box.appendChild(el('span', 'note', round.note));
+    box.classList.remove('off');
   }
 
-  function gameCard(game, members) {
-    var card = el('div', 'card');
-    var top = el('div', 'card-top', game.emoji || iconFor(game.id));
-    card.appendChild(top);
-    var body = el('div', 'card-body');
-    body.appendChild(el('h3', '', game.title || 'Untitled'));
-
-    var meta = el('div', 'meta');
-    meta.appendChild(el('span', 'badge', String(game.category || 'freestyle')));
-    if (game.featured) meta.appendChild(el('span', 'flag', 'pick'));
-    if (game.house) meta.appendChild(el('span', 'badge', 'house'));
-    body.appendChild(meta);
-
-    if (game.description) body.appendChild(el('div', 'desc', game.description));
-
-    var row = el('div', 'cardrow');
-    var by = el('div', 'by');
-    var m = null;
+  function memberOf(members, login) {
+    var low = String(login || '').toLowerCase();
     for (var i = 0; members && i < members.length; i++) {
-      if (String(members[i].login).toLowerCase() === String(game.owner).toLowerCase()) m = members[i];
+      if (String(members[i].login).toLowerCase() === low) return members[i];
     }
+    return null;
+  }
+
+  function makerLine(game, members) {
+    var m = memberOf(members, game.owner);
+    var by = el('span', 'by');
     var img = document.createElement('img');
     img.src = avatarUrl(m && m.avatar, m && m.id);
     img.alt = '';
     img.loading = 'lazy';
     by.appendChild(img);
-    var who = el('a', '', '@' + game.owner);
-    var pu = profileUrl(game.owner);
-    if (pu) {
-      who.href = pu;
-      who.rel = 'noopener noreferrer';
-      who.target = '_blank';
-    } else {
-      who = el('span', 'muted', String(game.owner || ''));
-    }
-    by.appendChild(who);
-    row.appendChild(by);
-    if (game.updated) row.appendChild(el('span', 'stars', ago(game.updated)));
-    body.appendChild(row);
+    by.appendChild(el('span', '', game.owner));
+    return by;
+  }
 
-    var play = el('a', 'btn', '▶ PLAY');
-    play.classList.add('mt-auto');
-    play.href = '/play.html?g=' + encodeURIComponent(game.id);
-    body.appendChild(play);
-    card.appendChild(body);
+  /* One card, used on the arcade grid and on a profile. */
+  function gameCard(game, members) {
+    var card = el('a', 'card');
+    card.href = '/play.html?g=' + encodeURIComponent(game.id);
+    card.appendChild(coverNode(game));
+    card.appendChild(el('h3', '', game.title || 'Untitled'));
+    var foot = el('div', 'card-foot');
+    foot.appendChild(makerLine(game, members));
+    if (game.status === 'draft') foot.appendChild(el('span', 'tag-draft', 'draft'));
+    else foot.appendChild(el('span', 'cat', game.house ? 'house' : (game.category || 'freestyle')));
+    card.appendChild(foot);
     return card;
   }
 
   function fail(host, message) {
     if (!host) return;
     clear(host);
-    host.appendChild(el('div', 'err', message));
+    host.appendChild(el('p', 'dim', message));
   }
 
   purgeOldSecrets();
 
   return {
-    el: el, clear: clear, data: data, post: post, nav: nav, roundBanner: roundBanner,
-    gameCard: gameCard, playUrl: playUrl, avatarUrl: avatarUrl, profileUrl: profileUrl,
-    iconFor: iconFor, ago: ago, fail: fail, lsGet: lsGet, lsSet: lsSet
+    el: el, clear: clear, show: show, data: data, post: post, nav: nav, strip: strip,
+    gameCard: gameCard, coverNode: coverNode, coverUrl: coverUrl, makerLine: makerLine,
+    memberOf: memberOf, playUrl: playUrl, avatarUrl: avatarUrl, profileUrl: profileUrl,
+    ago: ago, fail: fail, hashOf: hashOf, lsGet: lsGet, lsSet: lsSet
   };
 }());

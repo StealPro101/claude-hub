@@ -4,10 +4,11 @@
  */
 
 import { json, errorJson, nowIso, randomCode } from './util.js';
-import { clean, isId, allowedCategory, MAX_DESC } from './validate.js';
+import { clean, isId, allowedCategory, coverKey, MAX_TITLE, MAX_DESC } from './validate.js';
 import {
   getSettings, saveSettings, addLog, listMembers, listGames, gamesOfMember, removeGame,
-  isAdminId, refresh, houseGames, publicGame
+  isAdminId, refresh, houseGamesWithEdits, publicGame, setGameStatus, statusOf,
+  DRAFT, PUBLISHED
 } from './hub.js';
 import { gameKey as keyOfGame } from './validate.js';
 
@@ -37,9 +38,10 @@ export async function adminState(env, store) {
     },
     members: members,
     games: games.map((g) => Object.assign(publicGame(g), {
-      hidden: Boolean(g.hidden), source: g.source, ownerId: g.ownerId, repo: g.repo
+      hidden: Boolean(g.hidden), source: g.source, ownerId: g.ownerId, repo: g.repo,
+      status: statusOf(g), locked: Boolean(g.locked)
     })),
-    house: houseGames(env).map(publicGame),
+    house: (await houseGamesWithEdits(env, store)).map(publicGame),
     bans: bans,
     tombs: tombs,
     log: settings.log
@@ -87,6 +89,49 @@ export async function handleAdmin(path, body, env, store, session, ctx) {
     await addLog(store, {
       what: flag + (next[flag] ? ' on' : ' off'), who: who, detail: g.id
     });
+    return json({ ok: true });
+  }
+
+  if (path === '/api/admin/game/unpublish') {
+    const g = await findGame(store, body.id);
+    if (!g) return errorJson(404, 'no such game');
+    const res = await setGameStatus(store, g, DRAFT, who);
+    return res.ok ? json({ ok: true }) : errorJson(400, res.error);
+  }
+
+  /* take a picture off a member's game, or off a house game */
+  if (path === '/api/admin/game/cover-remove') {
+    const id = String(body.id || '');
+    if (id.indexOf('house/') === 0) {
+      const slug = id.slice('house/'.length);
+      const before = (await store.get('house:' + slug)) || {};
+      await store.delete(coverKey('house', slug));
+      await store.put('house:' + slug, Object.assign({}, before, { cover: null }));
+      await addLog(store, { what: 'picture removed', who: who, detail: id });
+      return json({ ok: true });
+    }
+    const g = await findGame(store, id);
+    if (!g) return errorJson(404, 'no such game');
+    await store.delete(coverKey(String(g.ownerId), g.repo));
+    await store.put(keyOfGame(g.ownerId, g.repo), Object.assign({}, g, { cover: null }));
+    await addLog(store, { what: 'picture removed', who: who, detail: g.id });
+    return json({ ok: true });
+  }
+
+  /* the house games have no member to look after them, so the owner does */
+  if (path === '/api/admin/house/meta') {
+    const slug = String(body.slug || '');
+    const house = (await houseGamesWithEdits(env, store)).find((g) => g.id === 'house/' + slug);
+    if (!house) return errorJson(404, 'no such house game');
+    const before = (await store.get('house:' + slug)) || {};
+    const title = clean(body.title, MAX_TITLE);
+    if (!title) return errorJson(400, 'a name is needed');
+    await store.put('house:' + slug, Object.assign({}, before, {
+      title: title,
+      description: clean(body.description, MAX_DESC),
+      category: allowedCategory(body.category) || house.category
+    }));
+    await addLog(store, { what: 'house game set', who: who, detail: 'house/' + slug });
     return json({ ok: true });
   }
 

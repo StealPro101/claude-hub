@@ -111,9 +111,19 @@ tools/             local only: dev-server.js, test.js, fake-github.js, file-stor
 wrangler.jsonc     name, vars, KV binding, assets binding, the 15 minute cron
 ```
 
-- **Storage** is one KV namespace behind a four-call interface (`get/put/delete/list`):
+- **Nothing is on show until its maker says so.** Every game arrives as a draft - added
+  by hand or picked up from the topic - and only its owner and you can see it. The
+  publish form sets the name, description, category and a cover picture; the browser
+  crops it to 960x600 and re-encodes it (which also strips the photo's location data),
+  and the Worker checks the bytes really are a WebP, JPEG or PNG before storing them
+  under `cover:<ownerId>/<repo>`. Covers are served from `/img/cover/...`, cached hard
+  once published and never cached while a game is still a draft.
+- **Storage** is one KV namespace behind a small interface (`get/put/delete/list`, plus
+  `putBytes/getBytes` for cover pictures):
   `member:<id>`, `game:<ownerId>/<repo>`, `tomb:<ownerId>/<repo>`, `ban:<id>`,
-  `settings`, and the Worker's own `secret:session` (which `list()` never returns).
+  `house:<slug>`, `rate:cover:<id>`, `settings`, the cover bytes under
+  `cover:<owner>/<repo>`, and the Worker's own `secret:session`. `list()` never returns
+  a `secret:*` or `cover:*` key, whatever prefix it is asked for.
 - **A game is always played from its owner's own address**, computed as
   `https://<login>.github.io/<repo>/`. The Hub never takes a URL from anybody.
 - **Members are refreshed by numeric id** (`GET /user/<id>`), so renaming a GitHub

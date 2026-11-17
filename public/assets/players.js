@@ -1,10 +1,10 @@
-/* The crew: a grid of members, and players.html#<login> for one profile. */
+/* The crew, and players.html#<login> for one person. Drafts are nobody else's business. */
 (function () {
   'use strict';
   var members = [], games = [];
   var listView = document.getElementById('listView');
   var profileView = document.getElementById('profileView');
-  var grid = document.getElementById('grid');
+  var people = document.getElementById('people');
 
   Hub.nav('players', null);
 
@@ -14,63 +14,58 @@
     Hub.nav('players', d.me);
     route();
   }).catch(function () {
-    Hub.fail(grid, 'Could not reach the Hub right now. Refresh in a minute.');
+    Hub.fail(people, 'Could not reach the Hub right now. Refresh in a minute.');
   });
 
   function gamesOf(login) {
     var low = String(login).toLowerCase();
-    return games.filter(function (g) { return String(g.owner).toLowerCase() === low; });
+    return games.filter(function (g) {
+      return String(g.owner).toLowerCase() === low && g.status !== 'draft';
+    });
   }
 
   function showList() {
-    profileView.classList.add('off');
-    listView.classList.remove('off');
+    Hub.show(profileView, false);
+    Hub.show(listView, true);
     document.getElementById('count').textContent = members.length
-      ? members.length + (members.length === 1 ? ' PLAYER' : ' PLAYERS') : '';
-    Hub.clear(grid);
+      ? members.length + (members.length === 1 ? ' person' : ' people') + ' on the Hub'
+      : '';
+    Hub.clear(people);
     if (!members.length) {
-      grid.appendChild(Hub.el('div', 'empty', 'Nobody has joined yet.'));
+      people.appendChild(Hub.el('p', 'dim', 'Nobody has joined yet.'));
       return;
     }
     for (var i = 0; i < members.length; i++) {
       (function (m) {
-        var card = Hub.el('div', 'card mcard');
+        var a = Hub.el('a', 'person');
+        a.href = '/players.html#' + encodeURIComponent(m.login);
         var img = document.createElement('img');
         img.src = Hub.avatarUrl(m.avatar, m.id);
         img.alt = '';
         img.loading = 'lazy';
-        card.appendChild(img);
-        var box = Hub.el('div');
-        box.appendChild(Hub.el('div', 'pname', m.name || m.login));
-        box.appendChild(Hub.el('div', 'pstats', '@' + m.login));
+        a.appendChild(img);
+        var box = Hub.el('span');
+        box.appendChild(Hub.el('span', 'n', m.name || m.login));
         var n = gamesOf(m.login).length;
-        box.appendChild(Hub.el('div', 'pstats', n + (n === 1 ? ' game' : ' games')));
-        var a = Hub.el('a', 'btn alt sm', 'profile');
-        a.href = '/players.html#' + encodeURIComponent(m.login);
-        a.classList.add('mt-s');
-        box.appendChild(a);
-        card.appendChild(box);
-        grid.appendChild(card);
+        box.appendChild(Hub.el('span', 's', n + (n === 1 ? ' game' : ' games')));
+        a.appendChild(box);
+        people.appendChild(a);
       }(members[i]));
     }
   }
 
   function showProfile(login) {
-    var low = String(login).toLowerCase();
-    var m = null;
-    for (var i = 0; i < members.length; i++) {
-      if (String(members[i].login).toLowerCase() === low) m = members[i];
-    }
+    var m = Hub.memberOf(members, login);
     if (!m) { showList(); return; }
-    listView.classList.add('off');
-    profileView.classList.remove('off');
+    Hub.show(listView, false);
+    Hub.show(profileView, true);
     document.getElementById('pAv').src = Hub.avatarUrl(m.avatar, m.id);
     document.getElementById('pName').textContent = m.name || m.login;
     var loginEl = document.getElementById('pLogin');
     Hub.clear(loginEl);
-    var link = Hub.el('a', '', '@' + m.login + ' on GitHub');
     var url = Hub.profileUrl(m.login);
     if (url) {
+      var link = Hub.el('a', '', '@' + m.login + ' on GitHub');
       link.href = url;
       link.rel = 'noopener noreferrer';
       link.target = '_blank';
@@ -81,14 +76,12 @@
     document.getElementById('pBio').textContent = m.bio || '';
     var list = gamesOf(m.login);
     document.getElementById('pStats').textContent =
-      list.length + (list.length === 1 ? ' game' : ' games') + ' in the arcade' +
+      list.length + (list.length === 1 ? ' game' : ' games') +
       (m.joined ? ' · joined ' + m.joined : '');
     var pg = document.getElementById('pGames');
     Hub.clear(pg);
-    if (!list.length) {
-      pg.appendChild(Hub.el('div', 'empty', 'No games from ' + (m.name || m.login) + ' yet.'));
-      return;
-    }
+    document.getElementById('pEmpty').textContent = list.length
+      ? '' : 'Nothing published yet.';
     for (var j = 0; j < list.length; j++) pg.appendChild(Hub.gameCard(list[j], members));
   }
 

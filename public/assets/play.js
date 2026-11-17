@@ -4,7 +4,8 @@
  *
  * Every game - house games included - lives on someone's <login>.github.io, a
  * different origin from the Hub, so it goes in a sandboxed iframe and can never reach
- * the Hub's cookies or API.
+ * the Hub's cookies or API. A draft is only in the data for its maker and the Hub
+ * owner, so to anyone else it looks exactly like a game that does not exist.
  */
 (function () {
   'use strict';
@@ -25,11 +26,11 @@
     title.textContent = 'Not on the Hub';
     by.textContent = '';
     Hub.clear(holder);
-    var box = Hub.el('div', 'panel');
-    box.appendChild(Hub.el('p', 'mini', message));
-    var a = Hub.el('a', 'btn alt sm', 'back to the arcade');
+    var box = Hub.el('div', 'mt-l');
+    box.appendChild(Hub.el('p', 'dim', message));
+    var a = Hub.el('a', 'btn mt');
     a.href = '/';
-    a.classList.add('mt-m');
+    a.textContent = 'Back to the arcade';
     box.appendChild(a);
     holder.appendChild(box);
   }
@@ -40,7 +41,6 @@
   }
 
   Hub.data().then(function (d) {
-    Hub.nav('arcade', d.me);
     var game = null;
     var games = Array.isArray(d.games) ? d.games : [];
     for (var i = 0; i < games.length; i++) {
@@ -57,23 +57,28 @@
     }
 
     title.textContent = game.title || 'Untitled';
-    by.textContent = 'by @' + game.owner + (game.category ? ' · ' + game.category : '');
+    by.textContent = game.owner + (game.category ? ' · ' + game.category : '');
+    if (game.status === 'draft') {
+      var tag = Hub.el('span', 'tag-draft', 'draft — only you can see this');
+      by.textContent = game.owner + ' · ';
+      by.appendChild(tag);
+    }
 
-    var open = Hub.el('a', 'btn alt sm', 'open in new tab');
+    var open = Hub.el('a', 'btn btn--sm', 'Open in new tab');
     open.href = url;
     open.target = '_blank';
     open.rel = 'noopener noreferrer';
     acts.appendChild(open);
 
     if (game.repoUrl && String(game.repoUrl).indexOf('https://github.com/') === 0) {
-      var code = Hub.el('a', 'btn alt sm', 'code');
+      var code = Hub.el('a', 'btn btn--sm', 'Code');
       code.href = game.repoUrl;
       code.target = '_blank';
       code.rel = 'noopener noreferrer';
       acts.appendChild(code);
     }
 
-    var report = Hub.el('a', 'btn alt sm', 'report');
+    var report = Hub.el('a', 'btn btn--sm', 'Report');
     report.href = '/rules.html#report';
     acts.appendChild(report);
 
@@ -88,7 +93,7 @@
     frame.src = url;
     holder.appendChild(frame);
     note.textContent = 'This game runs on ' + game.owner +
-      '.github.io. The Hub does not check anyone’s code - play at your own risk.';
+      '.github.io. The Hub does not check anyone’s code — play at your own risk.';
   }).catch(function () {
     nope('Could not reach the Hub right now. Refresh in a minute.');
   });
