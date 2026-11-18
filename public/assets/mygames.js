@@ -1,5 +1,15 @@
 /*
- * My games: drafts, shared games, the publish form, and the one setting a member has.
+ * My games, built around the thing you came to do.
+ *
+ * Three views, one at a time, never a form hidden at the top of a long page:
+ *   the list     everything you have, with the one primary button at the top right
+ *   add          the projects on your account that could be games - Add goes straight
+ *                into the editor for that game
+ *   the editor   one game, every field, and a sticky row saying what will happen
+ *
+ * mygames.html#edit=<repo> opens the editor directly, which is where the draft notice
+ * on a game page and the drafts badge in the bar both point.
+ *
  * The server re-checks that every repo is really theirs, every time.
  */
 (function () {
@@ -8,6 +18,12 @@
   var hub = null;
   var editing = null;
   var cropper = null;
+  var filter = 'all';
+  var view = 'list';
+
+  var listView = document.getElementById('listView');
+  var addView = document.getElementById('addView');
+  var editView = document.getElementById('editView');
 
   function say(id, text, bad) {
     var n = document.getElementById(id);
@@ -44,8 +60,8 @@
         else say('fMsg', 'Drag the picture to choose what shows.');
       }
     });
-    drawMine();
-    loadRepos();
+    drawList();
+    route();
   }
 
   function fillCategories(d) {
@@ -64,6 +80,8 @@
     var low = String(me.login).toLowerCase();
     return (hub.games || []).filter(function (g) {
       return !g.house && String(g.owner).toLowerCase() === low;
+    }).sort(function (a, b) {
+      return String(b.updated || '').localeCompare(String(a.updated || ''));
     });
   }
 
@@ -71,104 +89,308 @@
     return game.repo || game.id.slice(game.id.indexOf('/') + 1);
   }
 
-  function row(game) {
-    var r = Hub.el('div', 'row-item');
-    var who = Hub.el('div', 'who');
-    var mini = Hub.el('div', 'mini');
-    var shot = Hub.el('div', 'shot');
-    Hub.coverInto(shot, game);
-    mini.appendChild(shot);
-    who.appendChild(mini);
-    var box = Hub.el('div');
-    box.appendChild(Hub.el('div', 'name', game.title || 'Untitled'));
-    box.appendChild(Hub.el('div', 'sub', game.id + ' · ' + (game.category || 'freestyle')));
-    if (game.status !== 'draft') {
-      box.appendChild(Hub.el('div', 'sub', Hub.count(game.visits || 0, 'visit')));
-    }
-    who.appendChild(box);
-    r.appendChild(who);
+  function isDraft(game) { return game.status === 'draft'; }
 
-    var acts = Hub.el('div', 'acts');
+  /* ---------- which view is on ---------- */
+
+  function show(which) {
+    view = which;
+    Hub.show(listView, which === 'list');
+    Hub.show(addView, which === 'add');
+    Hub.show(editView, which === 'edit');
+    window.scrollTo(0, 0);
+  }
+
+  function route() {
+    var h = '';
+    try { h = decodeURIComponent(location.hash.replace(/^#/, '')); } catch (e) { h = ''; }
+    if (h.indexOf('edit=') === 0) {
+      var repo = h.slice(5);
+      var game = mineOnly().filter(function (g) {
+        return repoOf(g).toLowerCase() === repo.toLowerCase();
+      })[0];
+      if (game) {
+        openEditor(game);
+        return;
+      }
+      say('msg', 'That game is not on your list any more.', true);
+    }
+    if (h === 'add') {
+      openAdd();
+      return;
+    }
+    if (h === 'drafts' || h === 'shared' || h === 'all') {
+      filter = h;
+      drawList();
+    }
+    show('list');
+  }
+
+  window.addEventListener('hashchange', route);
+
+  function backToList(message) {
+    if (location.hash) {
+      try {
+        history.replaceState(null, '', location.pathname);
+      } catch (e) { location.hash = ''; }
+    }
+    editing = null;
+    show('list');
+    if (message) say('msg', message);
+  }
+
+  /* ---------- the list ---------- */
+
+  function counts() {
+    var all = mineOnly();
+    return {
+      all: all.length,
+      drafts: all.filter(isDraft).length,
+      shared: all.filter(function (g) { return !isDraft(g); }).length
+    };
+  }
+
+  function drawFilters() {
+    var host = document.getElementById('filters');
+    var n = counts();
+    Hub.clear(host);
+    [['all', 'All', n.all], ['drafts', 'Drafts', n.drafts], ['shared', 'Shared', n.shared]]
+      .forEach(function (row) {
+        var b = Hub.el('button', 'mg-tab' + (filter === row[0] ? ' on' : ''));
+        b.type = 'button';
+        b.setAttribute('aria-pressed', filter === row[0] ? 'true' : 'false');
+        b.appendChild(Hub.el('span', 'w', row[1]));
+        b.appendChild(Hub.el('span', 'n', String(row[2])));
+        b.addEventListener('click', function () {
+          filter = row[0];
+          drawList();
+        });
+        host.appendChild(b);
+      });
+  }
+
+  function row(game) {
+    var r = Hub.el('div', 'mg-row');
+    var shot = Hub.el('a', 'mg-shot');
+    shot.href = '/play.html?g=' + encodeURIComponent(game.id);
+    Hub.coverInto(shot, game);
+    r.appendChild(shot);
+
+    var mid = Hub.el('div', 'mg-mid');
+    var name = Hub.el('a', 'mg-name', game.title || 'Untitled');
+    name.href = '/play.html?g=' + encodeURIComponent(game.id);
+    mid.appendChild(name);
+    mid.appendChild(Hub.el('div', 'mg-state' + (isDraft(game) ? ' draft' : ''),
+      isDraft(game)
+        ? 'Draft — only you can see this'
+        : 'Shared · ' + Hub.count(game.visits || 0, 'visit')));
+    mid.appendChild(Hub.el('div', 'mg-when',
+      'changed ' + (Hub.niceDate(game.updated) || 'recently')));
+    r.appendChild(mid);
+
+    var acts = Hub.el('div', 'mg-acts');
     var repo = repoOf(game);
 
-    var setUp = Hub.el('button', 'btn btn--sm' + (game.status === 'draft' ? '' : ' btn--grey'),
-      game.status === 'draft' ? 'Set up & publish' : 'Edit');
-    setUp.type = 'button';
-    setUp.addEventListener('click', function () { openForm(game); });
-    acts.appendChild(setUp);
+    var edit = Hub.el('button', 'btn btn--sm' + (isDraft(game) ? '' : ' btn--ghost'),
+      isDraft(game) ? 'Set up & publish' : 'Edit');
+    edit.type = 'button';
+    edit.addEventListener('click', function () { openEditor(game); });
+    acts.appendChild(edit);
 
-    var play = Hub.el('a', 'btn btn--grey btn--sm', game.status === 'draft' ? 'Test' : 'Open');
+    var quiet = Hub.el('div', 'mg-quiet');
+    var play = Hub.el('a', 'linkbtn', isDraft(game) ? 'Test' : 'Open');
     play.href = '/play.html?g=' + encodeURIComponent(game.id);
-    acts.appendChild(play);
+    quiet.appendChild(play);
 
-    if (game.status !== 'draft') {
-      var un = Hub.el('button', 'btn btn--grey btn--sm', 'Unpublish');
+    if (!isDraft(game)) {
+      var un = Hub.el('button', 'linkbtn', 'Unpublish');
       un.type = 'button';
       un.addEventListener('click', function () {
         un.disabled = true;
         Hub.post('/api/games/unpublish', { repo: repo }).then(function (res) {
-          if (res.ok) reload('Back to a draft. Only you can see it now.');
+          if (res.ok) reload('“' + (game.title || repo) + '” is a draft again. Only you can see it.');
           else {
             say('msg', res.error, true);
             un.disabled = false;
           }
         });
       });
-      acts.appendChild(un);
+      quiet.appendChild(un);
     }
 
-    var rm = Hub.el('button', 'btn btn--grey btn--sm', 'Remove');
+    /* removing asks once, right here - never a browser box */
+    var rm = Hub.el('button', 'linkbtn danger', 'Remove');
     rm.type = 'button';
     rm.addEventListener('click', function () {
-      rm.disabled = true;
-      Hub.post('/api/games/remove', { repo: repo }).then(function (res) {
-        if (res.ok) reload('Removed ' + game.id + '. Your repo is untouched.');
-        else {
-          say('msg', res.error, true);
-          rm.disabled = false;
-        }
+      Hub.clear(quiet);
+      var ask = Hub.el('span', 'mg-ask', 'Take it off the Hub?');
+      var yes = Hub.el('button', 'linkbtn danger', 'Remove');
+      yes.type = 'button';
+      yes.addEventListener('click', function () {
+        yes.disabled = true;
+        Hub.post('/api/games/remove', { repo: repo }).then(function (res) {
+          if (res.ok) reload('Removed “' + (game.title || repo) + '”. Your project on GitHub is untouched.');
+          else {
+            say('msg', res.error, true);
+            drawList();
+          }
+        });
       });
+      var no = Hub.el('button', 'linkbtn', 'Keep it');
+      no.type = 'button';
+      no.addEventListener('click', drawList);
+      quiet.appendChild(ask);
+      quiet.appendChild(yes);
+      quiet.appendChild(no);
+      yes.focus();
     });
-    acts.appendChild(rm);
-
+    quiet.appendChild(rm);
+    acts.appendChild(quiet);
     r.appendChild(acts);
     return r;
   }
 
-  function drawMine() {
+  function emptyNote() {
+    var box = Hub.el('div', 'mg-empty');
+    if (filter === 'drafts') {
+      box.appendChild(Hub.el('p', '', 'No drafts waiting.'));
+      box.appendChild(Hub.el('p', 'muted',
+        'A draft is a game only you can see, until you set it up and publish it.'));
+    } else if (filter === 'shared') {
+      box.appendChild(Hub.el('p', '', 'You have not shared a game yet.'));
+      box.appendChild(Hub.el('p', 'muted',
+        'Open a draft, give it a name and a picture, and press Publish.'));
+    } else {
+      box.appendChild(Hub.el('p', '', 'Nothing here yet.'));
+      box.appendChild(Hub.el('p', 'muted',
+        'Press “Add a game” and pick one of your GitHub projects. It arrives as a draft.'));
+    }
+    var p = Hub.el('p', 'btn-row mt');
+    var a = Hub.el('button', 'btn', 'Add a game');
+    a.type = 'button';
+    a.addEventListener('click', openAdd);
+    p.appendChild(a);
+    box.appendChild(p);
+    return box;
+  }
+
+  function drawList() {
+    drawFilters();
     var all = mineOnly();
-    var drafts = all.filter(function (g) { return g.status === 'draft'; });
-    var live = all.filter(function (g) { return g.status !== 'draft'; });
-
-    var dBox = document.getElementById('drafts');
-    Hub.clear(dBox);
-    if (!drafts.length) dBox.appendChild(Hub.el('p', 'muted', 'No drafts waiting.'));
-    drafts.forEach(function (g) { dBox.appendChild(row(g)); });
-
-    var lBox = document.getElementById('live');
-    Hub.clear(lBox);
-    if (!live.length) lBox.appendChild(Hub.el('p', 'muted', 'Nothing shared yet.'));
-    live.forEach(function (g) { lBox.appendChild(row(g)); });
+    var list = all.filter(function (g) {
+      if (filter === 'drafts') return isDraft(g);
+      if (filter === 'shared') return !isDraft(g);
+      return true;
+    });
+    var host = document.getElementById('rows');
+    Hub.clear(host);
+    if (!list.length) {
+      host.appendChild(emptyNote());
+      return;
+    }
+    list.forEach(function (g) { host.appendChild(row(g)); });
   }
 
   function reload(message) {
-    Hub.data(true).then(function (d) {
+    return Hub.data(true).then(function (d) {
       hub = d;
       Hub.bar('mygames', d);
-      drawMine();
-      loadRepos();
+      drawList();
       if (message) say('msg', message);
+      return d;
     });
   }
 
-  /* ---------- the form ---------- */
+  /* ---------- adding ---------- */
 
-  function openForm(game) {
+  function openAdd() {
+    say('addMsg', '');
+    show('add');
+    loadRepos();
+    document.getElementById('addBack').focus();
+  }
+
+  document.getElementById('addBtn').addEventListener('click', function () { openAdd(); });
+  document.getElementById('addBack').addEventListener('click', function (ev) {
+    ev.preventDefault();
+    backToList('');
+  });
+
+  function loadRepos() {
+    var box = document.getElementById('repos');
+    Hub.clear(box);
+    box.appendChild(Hub.el('p', 'muted', 'Looking at your GitHub projects…'));
+    fetch('/api/my/repos', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        Hub.clear(box);
+        if (!j.ok) {
+          box.appendChild(Hub.el('p', 'muted', j.error || 'GitHub did not answer.'));
+          return;
+        }
+        if (!j.repos.length) {
+          box.appendChild(Hub.el('p', 'muted',
+            'No projects are ready yet. Make a public repo with your game in index.html and switch GitHub Pages on.'));
+          return;
+        }
+        j.repos.forEach(function (r) { box.appendChild(repoRow(r)); });
+      })
+      .catch(function () {
+        Hub.clear(box);
+        box.appendChild(Hub.el('p', 'muted', 'Could not ask GitHub right now.'));
+      });
+  }
+
+  function repoRow(r) {
+    var item = Hub.el('div', 'mg-row mg-row--repo');
+    var mid = Hub.el('div', 'mg-mid');
+    mid.appendChild(Hub.el('div', 'mg-name', r.repo));
+    var bits = [];
+    if (r.description) bits.push(r.description);
+    if (r.updated) bits.push('changed ' + Hub.ago(r.updated));
+    mid.appendChild(Hub.el('div', 'mg-when', bits.join(' · ') || 'ready'));
+    item.appendChild(mid);
+
+    var acts = Hub.el('div', 'mg-acts');
+    if (r.onHub) {
+      acts.appendChild(Hub.el('span', 'pill pill-live', 'already added'));
+    } else {
+      var add = Hub.el('button', 'btn btn--sm', 'Add');
+      add.type = 'button';
+      add.addEventListener('click', function () {
+        add.disabled = true;
+        say('addMsg', 'adding…');
+        Hub.post('/api/games/add', { repo: r.repo }).then(function (res) {
+          if (!res.ok) {
+            say('addMsg', res.error, true);
+            add.disabled = false;
+            return;
+          }
+          /* straight into the editor for it - that is what you came to do */
+          reload('').then(function () {
+            var game = mineOnly().filter(function (g) {
+              return repoOf(g).toLowerCase() === r.repo.toLowerCase();
+            })[0];
+            say('addMsg', '');
+            if (game) openEditor(game, 'Added as a draft. Give it a name and a picture.');
+            else backToList('Added ' + r.repo + ' as a draft.');
+          });
+        });
+      });
+      acts.appendChild(add);
+    }
+    item.appendChild(acts);
+    return item;
+  }
+
+  /* ---------- the editor ---------- */
+
+  function openEditor(game, note) {
     editing = game;
-    Hub.show('form', true);
-    document.getElementById('formTitle').textContent =
-      game.status === 'draft' ? 'Set up & publish' : 'Edit';
-    document.getElementById('formFor').textContent = game.id;
+    var draft = isDraft(game);
+    document.getElementById('editTitle').textContent = game.title || repoOf(game);
+    document.getElementById('editFor').textContent =
+      (draft ? 'Draft · ' : 'Shared · ') + game.id;
     document.getElementById('fName').value = game.title || '';
     document.getElementById('fDesc').value = game.description || '';
     document.getElementById('fHow').value = game.howto || '';
@@ -176,18 +398,25 @@
     var sel = document.getElementById('fCat');
     sel.value = game.category || 'freestyle';
     if (!sel.value && sel.options.length) sel.value = sel.options[0].value;
-    document.getElementById('fPublish').textContent =
-      game.status === 'draft' ? 'Publish' : 'Save';
+    document.getElementById('fPublish').textContent = draft ? 'Publish' : 'Save changes';
+    document.getElementById('fSave').textContent = 'Save as draft';
+    /* nothing to remove when there is no picture yet */
+    Hub.show('coverOffRow', Boolean(game.cover));
     cropper.reset();
-    say('fMsg', '');
-    document.getElementById('form').scrollIntoView({ block: 'start' });
+    say('fMsg', note || (draft
+      ? 'Nobody sees this until you press Publish.'
+      : 'This one is in the arcade. Changes show up as soon as you save.'));
+    show('edit');
+    try {
+      history.replaceState(null, '', location.pathname + '#edit=' + encodeURIComponent(repoOf(game)));
+    } catch (e) { /* the editor is open either way */ }
     document.getElementById('fName').focus();
   }
 
-  function closeForm() {
-    editing = null;
-    Hub.show('form', false);
-  }
+  document.getElementById('editBack').addEventListener('click', function (ev) {
+    ev.preventDefault();
+    backToList('');
+  });
 
   function saveMeta() {
     return Hub.post('/api/games/meta', {
@@ -215,8 +444,10 @@
     return j;
   }
 
-  async function finish(publish) {
-    var btn = document.getElementById(publish ? 'fPublish' : 'fSave');
+  /* what: 'publish' | 'draft' | 'save' */
+  async function finish(what) {
+    var btn = document.getElementById(what === 'publish' ? 'fPublish' : 'fSave');
+    var was = editing;
     btn.disabled = true;
     say('fMsg', 'saving…');
     try {
@@ -230,25 +461,49 @@
         say('fMsg', cover.error, true);
         return;
       }
-      if (publish) {
-        var pub = await Hub.post('/api/games/publish', { repo: repoOf(editing) });
+      if (what === 'publish') {
+        var pub = await Hub.post('/api/games/publish', { repo: repoOf(was) });
         if (!pub.ok) {
           say('fMsg', pub.error, true);
           return;
         }
       }
-      closeForm();
-      reload(publish ? 'Published. Everyone can see it now.' : 'Saved as a draft.');
+      if (what === 'draft' && !isDraft(was)) {
+        var un = await Hub.post('/api/games/unpublish', { repo: repoOf(was) });
+        if (!un.ok) {
+          say('fMsg', un.error, true);
+          return;
+        }
+      }
+      await reload('');
+      backToList('');
+      done(what, was);
     } finally {
       btn.disabled = false;
     }
   }
 
+  /* say plainly what happened, with a way to go and look */
+  function done(what, game) {
+    var host = document.getElementById('msg');
+    Hub.clear(host);
+    host.className = 'msg ok';
+    var said = what === 'publish'
+      ? 'Published — it is in the arcade now.'
+      : (what === 'draft'
+        ? 'Saved as a draft — only you can see it now.'
+        : 'Saved. The changes are live.');
+    host.appendChild(document.createTextNode(said + ' '));
+    var a = Hub.el('a', '', 'See its page');
+    a.href = '/play.html?g=' + encodeURIComponent(game.id);
+    host.appendChild(a);
+  }
+
   document.getElementById('fPublish').addEventListener('click', function () {
-    finish(editing && editing.status === 'draft');
+    finish(editing && isDraft(editing) ? 'publish' : 'save');
   });
-  document.getElementById('fSave').addEventListener('click', function () { finish(false); });
-  document.getElementById('fClose').addEventListener('click', closeForm);
+  document.getElementById('fSave').addEventListener('click', function () { finish('draft'); });
+  document.getElementById('fClose').addEventListener('click', function () { backToList(''); });
   document.getElementById('file').addEventListener('change', function (ev) {
     if (ev.target.files && ev.target.files[0]) cropper.load(ev.target.files[0]);
   });
@@ -258,7 +513,11 @@
     Hub.post('/api/games/cover-remove', { repo: repoOf(editing) }).then(function (res) {
       if (res.ok) {
         say('fMsg', 'Picture removed.');
-        reload();
+        Hub.show('coverOffRow', false);
+        Hub.data(true).then(function (d) {
+          hub = d;
+          drawList();
+        });
       } else {
         say('fMsg', res.error, true);
       }
@@ -272,59 +531,4 @@
         : (r.error || 'that did not work'), !r.ok);
     });
   });
-
-  /* ---------- adding a repo ---------- */
-
-  function loadRepos() {
-    var box = document.getElementById('repos');
-    fetch('/api/my/repos', { credentials: 'same-origin', cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        Hub.clear(box);
-        if (!j.ok) {
-          box.appendChild(Hub.el('p', 'muted', j.error || 'GitHub did not answer.'));
-          return;
-        }
-        if (!j.repos.length) {
-          box.appendChild(Hub.el('p', 'muted',
-            'No repos ready yet. Make a public repo with your game in index.html and switch GitHub Pages on.'));
-          return;
-        }
-        j.repos.forEach(function (r) {
-          var item = Hub.el('div', 'row-item');
-          var box2 = Hub.el('div');
-          box2.appendChild(Hub.el('div', 'name', r.repo));
-          var bits = [];
-          if (r.topic) bits.push('has the topic');
-          if (r.stars) bits.push(Hub.count(r.stars, 'star'));
-          if (r.updated) bits.push('updated ' + Hub.ago(r.updated));
-          box2.appendChild(Hub.el('div', 'sub', bits.join(' · ') || 'ready'));
-          item.appendChild(box2);
-          var acts = Hub.el('div', 'acts');
-          if (r.onHub) {
-            acts.appendChild(Hub.el('span', 'pill pill-live', 'added'));
-          } else {
-            var add = Hub.el('button', 'btn btn--sm', 'Add as draft');
-            add.type = 'button';
-            add.addEventListener('click', function () {
-              add.disabled = true;
-              Hub.post('/api/games/add', { repo: r.repo }).then(function (res) {
-                if (res.ok) reload('Added ' + res.game.id + ' as a draft.');
-                else {
-                  say('msg', res.error, true);
-                  add.disabled = false;
-                }
-              });
-            });
-            acts.appendChild(add);
-          }
-          item.appendChild(acts);
-          box.appendChild(item);
-        });
-      })
-      .catch(function () {
-        Hub.clear(box);
-        box.appendChild(Hub.el('p', 'muted', 'Could not ask GitHub right now.'));
-      });
-  }
 }());

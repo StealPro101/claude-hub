@@ -20,26 +20,76 @@
   </section>
 
   <div class="off" id="signedIn">
-    <section class="box off" id="form">
-      <div class="box-head"><h2 id="formTitle">Set up &amp; publish</h2><span class="sub" id="formFor"></span></div>
-      <div class="box-body form-grid">
+
+    <!-- the list: everything you have, and the one button that starts a new one -->
+    <div id="listView">
+      <div class="page-head">
+        <h1>My games</h1>
+        <button class="btn btn--big" id="addBtn" type="button">Add a game</button>
+      </div>
+      <div class="mg">
+        <nav class="mg-side" id="filters" aria-label="Which of your games"></nav>
+        <div class="mg-main">
+          <p class="msg" id="msg"></p>
+          <div class="mg-rows" id="rows"></div>
+          <section class="mg-settings">
+            <h2>Settings</h2>
+            <label class="switch" for="showMe"><input type="checkbox" id="showMe" class="inline-field">
+              <span>Show when I&rsquo;m online</span></label>
+            <p class="hint">With this off, nobody sees you as online or playing. Your plays still count
+              towards a game&rsquo;s numbers, without your name.</p>
+            <p class="msg" id="setMsg"></p>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- adding: the projects on your account that could be games -->
+    <div id="addView" class="off">
+      <p class="back"><a href="/mygames.html" id="addBack">Back to my games</a></p>
+      <div class="page-head"><h1>Add a game</h1></div>
+      <p class="lead">Your project is public on GitHub; here it stays a draft until you publish it.</p>
+      <div class="mg-rows" id="repos"></div>
+      <p class="msg" id="addMsg"></p>
+      <details class="fold">
+        <summary>Nothing here?</summary>
+        <div class="fold-body">
+          <p>A project shows up here when it is <b>public</b>, <b>not a fork</b>, and has
+            <b>GitHub Pages</b> switched on with your game at <span class="mono">index.html</span>
+            in the root. Add the topic <span class="mono">claude-hub-game</span> to it and the Hub
+            picks it up on its own within 15 minutes, as a draft.</p>
+        </div>
+      </details>
+      <details class="fold">
+        <summary>Let your Claude do it</summary>
+        <div class="fold-body">
+          <textarea id="prompt" class="mono" readonly rows="9" aria-label="Prompt for your Claude"></textarea>
+          <p class="btn-row mt"><button class="btn btn--grey" id="copy" type="button">Copy the prompt</button></p>
+          <p class="msg" id="copyMsg"></p>
+        </div>
+      </details>
+    </div>
+
+    <!-- the editor: one game, every field, and what happens to it -->
+    <div id="editView" class="off">
+      <p class="back"><a href="/mygames.html" id="editBack">Back to my games</a></p>
+      <div class="page-head">
+        <h1 id="editTitle">Set up &amp; publish</h1>
+        <span class="page-sub" id="editFor"></span>
+      </div>
+      <div class="form-grid">
         <div>
           <div class="field"><label for="fName">Name</label>
             <input id="fName" type="text" maxlength="60" autocomplete="off"></div>
           <div class="field"><label for="fDesc">Short description</label>
-            <textarea id="fDesc" rows="2" maxlength="200"></textarea></div>
+            <textarea id="fDesc" rows="2" maxlength="200"
+              placeholder="One line about it, shown on the cards."></textarea></div>
           <div class="field"><label for="fCat">Category</label><select id="fCat"></select></div>
           <div class="field"><label for="fHow">How to play</label>
-            <textarea id="fHow" rows="4" maxlength="600" placeholder="Arrows to move. Space to jump."></textarea>
+            <textarea id="fHow" rows="5" maxlength="600" placeholder="Arrows to move. Space to jump."></textarea>
             <p class="hint">Shown beside the game. Line breaks are kept.</p></div>
           <div class="field"><label for="fNotes">Notes and credits</label>
-            <textarea id="fNotes" rows="4" maxlength="600" placeholder="Music by a friend, sprites by me."></textarea></div>
-          <p class="btn-row mt">
-            <button class="btn" id="fPublish" type="button">Publish</button>
-            <button class="btn btn--grey" id="fSave" type="button">Save as draft</button>
-            <button class="btn btn--grey" id="fClose" type="button">Close</button>
-          </p>
-          <p class="msg" id="fMsg"></p>
+            <textarea id="fNotes" rows="5" maxlength="600" placeholder="Music by a friend, sprites by me."></textarea></div>
         </div>
         <div>
           <span class="label">Cover picture</span>
@@ -51,51 +101,19 @@
             <input type="file" id="file" accept="image/*"></label>
           <p class="hint">Drag to choose what shows. Only the cropped 960&times;600 picture is kept
             &mdash; not the original, and not where it was taken.</p>
-          <p class="btn-row"><button class="btn btn--grey btn--sm" id="fCoverOff" type="button">Remove picture</button></p>
+          <p class="btn-row" id="coverOffRow"><button class="btn btn--grey btn--sm" id="fCoverOff" type="button">Remove picture</button></p>
         </div>
       </div>
-    </section>
-
-    <section class="box">
-      <div class="box-head"><h2>Drafts</h2><span class="sub">only you can see these</span></div>
-      <div class="box-body"><div class="rows" id="drafts"></div></div>
-    </section>
-
-    <section class="box">
-      <div class="box-head"><h2>Shared</h2><span class="sub">everyone can see these</span></div>
-      <div class="box-body"><div class="rows" id="live"></div></div>
-    </section>
-
-    <section class="box">
-      <div class="box-head"><h2>Add a game</h2></div>
-      <div class="box-body">
-        <p class="hint">Your repo is public on GitHub &mdash; that is how it is found. Here it stays
-          private until you publish it. Anything carrying the topic
-          <span class="mono">claude-hub-game</span> turns up on its own within 15 minutes, as a draft.</p>
-        <div class="rows" id="repos"></div>
-        <p class="msg" id="msg"></p>
+      <div class="act-bar">
+        <div class="act-in">
+          <button class="btn btn--big" id="fPublish" type="button">Publish</button>
+          <button class="btn btn--grey" id="fSave" type="button">Save as draft</button>
+          <button class="btn btn--grey" id="fClose" type="button">Cancel</button>
+          <p class="msg" id="fMsg"></p>
+        </div>
       </div>
-    </section>
+    </div>
 
-    <section class="box">
-      <div class="box-head"><h2>Settings</h2></div>
-      <div class="box-body">
-        <label class="btn-row" for="showMe"><input type="checkbox" id="showMe" class="inline-field">
-          <span>Show when I&rsquo;m online</span></label>
-        <p class="hint">With this off, nobody sees you as online or playing. Your plays still count
-          towards a game&rsquo;s numbers, without your name.</p>
-        <p class="msg" id="setMsg"></p>
-      </div>
-    </section>
-
-    <section class="box">
-      <div class="box-head"><h2>Let your Claude do it</h2></div>
-      <div class="box-body">
-        <textarea id="prompt" class="mono" readonly rows="9" aria-label="Prompt for your Claude"></textarea>
-        <p class="btn-row mt"><button class="btn btn--grey" id="copy" type="button">Copy the prompt</button></p>
-        <p class="msg" id="copyMsg"></p>
-      </div>
-    </section>
   </div>
 </main>
 <footer id="foot"></footer>

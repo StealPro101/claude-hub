@@ -109,7 +109,16 @@
     by.appendChild(who);
     info.appendChild(by);
     if (game.status === 'draft') {
-      info.appendChild(Hub.el('div', 'pill pill-draft gp-draft', 'Draft — only you can see this'));
+      var note = Hub.el('div', 'gp-draft');
+      note.appendChild(Hub.el('span', 'pill pill-draft', 'Draft — only you can see this'));
+      /* straight to the editor for this one, not to a page of boxes */
+      if (me && me.login === game.owner) {
+        var fix = Hub.el('a', 'small', 'Set it up');
+        fix.href = '/mygames.html#edit=' + encodeURIComponent(
+          game.repo || game.id.slice(game.id.indexOf('/') + 1));
+        note.appendChild(fix);
+      }
+      info.appendChild(note);
     }
 
     /* the one-line pitch sits here only when the boxes below hold something else */

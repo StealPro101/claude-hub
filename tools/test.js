@@ -1421,6 +1421,73 @@ async function testLoveMigration() {
     (await memberOf(byRefresh.store, 7002)).favorites.indexOf('friend-one/snake-dash') >= 0);
 }
 
+/* ---------- 14c. the editor saves every field, draft or shared ---------- */
+
+async function testEditEveryField() {
+  console.log('the editor saves everything');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+
+  const all = {
+    repo: 'plain-game',
+    title: 'The Whole Form',
+    description: 'every field, typed in',
+    category: 'puzzle',
+    howto: 'Arrows to move.\nSpace to jump.',
+    notes: 'Music by a friend.\nSprites by me.'
+  };
+
+  const asDraft = await call(env, '/api/games/meta', { body: all, cookie: mine });
+  eq('a draft takes every field', asDraft.res.status, 200);
+  for (const key of ['title', 'description', 'category', 'howto', 'notes']) {
+    eq('draft kept the ' + key, asDraft.body.game[key], all[key]);
+  }
+  eq('and it is still a draft', asDraft.body.game.status, 'draft');
+
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  const changed = Object.assign({}, all, {
+    title: 'Changed After Sharing',
+    description: 'edited while it was in the arcade',
+    category: 'arcade',
+    howto: 'WASD now.',
+    notes: 'Thanks everyone.'
+  });
+  const asShared = await call(env, '/api/games/meta', { body: changed, cookie: mine });
+  eq('a shared game takes every field too', asShared.res.status, 200);
+  for (const key of ['title', 'description', 'category', 'howto', 'notes']) {
+    eq('shared kept the ' + key, asShared.body.game[key], changed[key]);
+  }
+  eq('and it stays shared', asShared.body.game.status, 'published');
+  const stored = await gameOf(store, 7001, 'plain-game');
+  eq('the document really has the new name', stored.title, 'Changed After Sharing');
+  eq('and the new notes', stored.notes, 'Thanks everyone.');
+  const hub = await call(env, '/api/hub');
+  eq('the arcade shows the change at once',
+    hub.body.games.find((g) => g.id === 'friend-one/plain-game').title, 'Changed After Sharing');
+
+  /* emptying a field really empties it */
+  const cleared = await call(env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: 'Changed After Sharing', description: '', howto: '', notes: '' },
+    cookie: mine
+  });
+  eq('clearing the description works', cleared.body.game.description, '');
+  eq('clearing how to play works', cleared.body.game.howto, '');
+
+  /* and nobody else can do any of it */
+  const theirs = await call(env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: 'mine now' }, cookie: other
+  });
+  eq('somebody else cannot edit it', theirs.res.status, 404);
+
+  /* unpublishing from the editor, then publishing again */
+  const un = await call(env, '/api/games/unpublish', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('the editor can take it back to a draft', un.body.game.status, 'draft');
+  const re = await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  eq('and share it again', re.body.game.status, 'published');
+}
+
 async function testLongFields() {
   console.log('how to play / notes');
   const { env, store } = world();
@@ -1754,7 +1821,7 @@ async function testHeaders() {
 
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHubRepo, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
-  testDrafts, testCovers, testFavorites, testLoveMigration, testLongFields, testPresenceCore,
+  testDrafts, testCovers, testFavorites, testLoveMigration, testEditEveryField, testLongFields, testPresenceCore,
   testPresenceRoutes, testOneDocument, testHeaders];
 
 (async () => {
