@@ -1,6 +1,6 @@
 /*
- * The shared front end: the top bar, the footer, boxes, thumbnail rows, the little
- * drawn icons, and the heartbeat that keeps "who is playing" alive.
+ * The shared front end: the top bar, boxes, thumbnail rows, the little drawn icons,
+ * and the heartbeat that keeps "who is playing" alive.
  *
  * No inline script or style anywhere (the Content-Security-Policy allows neither), and
  * nothing anyone typed is ever written as HTML - it goes in through textContent.
@@ -53,7 +53,8 @@ var Hub = (function () {
     link: ['M10 14a3.6 3.6 0 0 1 0-5l2-2a3.6 3.6 0 1 1 5 5l-1 1M14 10a3.6 3.6 0 0 1 0 5l-2 2a3.6 3.6 0 1 1-5-5l1-1', 0],
     left: ['M14.5 5.5 8 12l6.5 6.5', 0],
     right: ['M9.5 5.5 16 12l-6.5 6.5', 0],
-    expand: ['M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', 0],
+    eye: ['M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 0],
+    exit: ['M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h9', 0],
     close: ['M6 6l12 12M18 6 6 18', 0],
     menu: ['M4 7h16M4 12h16M4 17h16', 0],
     play: ['M8 5.2v13.6L19 12z', 1],
@@ -196,6 +197,23 @@ var Hub = (function () {
   function count(n, one, many) {
     var v = Number(n) || 0;
     return v + ' ' + (v === 1 ? one : (many || one + 's'));
+  }
+
+  /*
+   * Big numbers, short: 999 stays 999, then 1.2K, 15K, 1.2M, 15M. One decimal only
+   * while it says something (under 10K / 10M), and never a trailing ".0".
+   */
+  function compact(n) {
+    var v = Number(n) || 0;
+    if (v < 0) v = 0;
+    function cut(value, unit) {
+      var s = value < 10 ? (Math.floor(value * 10) / 10).toFixed(1) : String(Math.floor(value));
+      if (s.slice(-2) === '.0') s = s.slice(0, -2);
+      return s + unit;
+    }
+    if (v < 1000) return String(Math.floor(v));
+    if (v < 1000000) return cut(v / 1000, 'K');
+    return cut(v / 1000000, 'M');
   }
 
   /* ---------- data ---------- */
@@ -455,36 +473,15 @@ var Hub = (function () {
     host.appendChild(inner);
   }
 
-  function footer() {
-    var host = document.getElementById('foot');
-    if (!host) return;
-    clear(host);
-    var inner = el('div', 'col foot-in');
-    var about = el('div', 'about');
-    about.appendChild(el('h3', '', 'About'));
-    about.appendChild(el('p', '',
-      'A small arcade for a few friends. Everyone makes games and everyone plays them.'));
-    about.appendChild(el('p', 'foot-note',
-      'Games run on their makers’ own pages. Nobody here checks their code, so play at your own risk.'));
-    inner.appendChild(about);
-
-    var links = el('div', 'foot-col');
-    links.appendChild(el('h3', '', 'Around here'));
-    [['/explore.html', 'Explore'], ['/players.html', 'Players'],
-      ['/rules.html', 'Rules'], ['/join.html', 'Join']].forEach(function (pair) {
-      var a = el('a', '', pair[1]);
-      a.href = pair[0];
-      links.appendChild(a);
-    });
-    inner.appendChild(links);
-    host.appendChild(inner);
-  }
-
-  /* ---------- boxes and rows ---------- */
+  /* ---------- boxes and rows ----------
+   *
+   * Two kinds: a bordered box for text and forms, and - with opts.row - a plain row,
+   * just a bold heading over the tiles, the way a games front page reads.
+   */
 
   function box(title, opts) {
     var o = opts || {};
-    var wrap = el('section', 'box');
+    var wrap = el('section', 'box' + (o.row ? ' box--row' : ''));
     var head = el('div', 'box-head');
     head.appendChild(el('h2', '', title));
     if (o.sub) head.appendChild(el('span', 'sub', o.sub));
@@ -627,11 +624,22 @@ var Hub = (function () {
     by.appendChild(who);
     wrap.appendChild(by);
 
-    /* the only number on a card: how many people are in there right now */
-    if (game.active > 0) {
-      var stats = el('div', 'pl');
-      stats.appendChild(icon('person', 12));
-      stats.appendChild(el('span', '', game.active + ' playing'));
+    /*
+     * Under every published game, always: who is in there now and how many visits it
+     * has had. A draft has neither - nobody has been in it but its maker.
+     */
+    if (game.status !== 'draft') {
+      var stats = el('div', 'tstats');
+      var live = Number(game.active) || 0;
+      var now = el('span', 'chunk' + (live > 0 ? ' live' : ''));
+      now.appendChild(icon('person', 12));
+      now.appendChild(el('span', '', compact(live) + ' playing'));
+      stats.appendChild(now);
+      var seen = Number(game.visits) || 0;
+      var been = el('span', 'chunk');
+      been.appendChild(icon('eye', 13));
+      been.appendChild(el('span', '', compact(seen) + (seen === 1 ? ' visit' : ' visits')));
+      stats.appendChild(been);
       wrap.appendChild(stats);
     }
     return wrap;
@@ -737,12 +745,12 @@ var Hub = (function () {
 
   return {
     el: el, clear: clear, show: show, icon: icon, logoMark: logoMark,
-    data: data, post: post, bar: bar, footer: footer, box: box, rail: rail,
+    data: data, post: post, bar: bar, box: box, rail: rail,
     thumb: thumb, personCard: personCard, presenceText: presenceText, sortPeople: sortPeople,
     starIcon: starIcon, favoriteToggle: toggle, paintStar: paint,
     coverInto: coverInto, coverUrl: coverUrl, playUrl: playUrl, avatarUrl: avatarUrl,
     profileUrl: profileUrl, memberOf: memberOf, ago: ago, niceDate: niceDate,
-    monthYear: monthYear, count: count, hashOf: hashOf, beat: beat, fail: fail,
+    monthYear: monthYear, count: count, compact: compact, hashOf: hashOf, beat: beat, fail: fail,
     lsGet: lsGet, lsSet: lsSet
   };
 }());

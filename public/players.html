@@ -11,7 +11,7 @@
 <header id="bar" class="bar"></header>
 <main id="main" class="col" tabindex="-1">
   <div id="listView">
-    <section class="box">
+    <section class="box box--row">
       <div class="box-head"><h2 id="count">Players</h2></div>
       <div class="box-body"><div class="people-grid" id="people"></div></div>
     </section>
@@ -31,18 +31,17 @@
     </div>
     <p class="pro-about pre off" id="pBio"></p>
 
-    <section class="box">
+    <section class="box box--row">
       <div class="box-head"><h2>Games</h2></div>
       <div class="box-body"><div class="grid" id="pGames"></div><p class="muted" id="pEmpty"></p></div>
     </section>
 
-    <section class="box off" id="favBox">
+    <section class="box box--row off" id="favBox">
       <div class="box-head"><h2>Favorites</h2><span class="sub">only you see these</span></div>
       <div class="box-body"><div class="grid" id="pFavs"></div></div>
     </section>
   </div>
 </main>
-<footer id="foot"></footer>
 <script src="/assets/hub.js"></script>
 <script src="/assets/players.js"></script>
 </body>

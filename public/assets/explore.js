@@ -18,7 +18,6 @@
   sort.value = state.sort;
 
   Hub.bar('explore', null);
-  Hub.footer();
 
   Hub.data().then(function (d) {
     Hub.bar('explore', d);

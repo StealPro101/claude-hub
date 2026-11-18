@@ -44,7 +44,6 @@
   }
 
   Hub.bar('admin', null);
-  Hub.footer();
 
   function load() {
     fetch('/api/admin/state', { credentials: 'same-origin', cache: 'no-store' })

@@ -1,6 +1,7 @@
 /*
  * Home: no name, no pitch, no headline - straight into what is yours, who is about and
- * what there is to play. Every row is a box with a header strip and a one-row carousel.
+ * what there is to play. Every row is a plain bold heading over a one-row carousel that
+ * runs the whole width of the page.
  *
  * For a signed-in member with favourites, their own row is pinned at the very top. It
  * is private: nobody else's page ever shows it, and no count of it exists anywhere.
@@ -10,7 +11,6 @@
   var main = document.getElementById('main');
 
   Hub.bar('home', null);
-  Hub.footer();
 
   Hub.data().then(draw).catch(function () {
     Hub.fail(main, 'Could not reach the Hub right now. Refresh in a minute.');
@@ -47,7 +47,7 @@
         return;
       }
       if (!favBox) {
-        favBox = Hub.box('Favorites', { sub: 'only you see these', tight: true });
+        favBox = Hub.box('Favorites', { sub: 'only you see these', tight: true, row: true });
         main.insertBefore(favBox.box, main.firstChild);
       }
       Hub.clear(favBox.body);
@@ -60,7 +60,7 @@
     if (members.length) {
       var people = Hub.sortPeople(members).map(function (m) { return Hub.personCard(m, games); });
       var pb = Hub.box('Players (' + members.length + ')', {
-        moreHref: '/players.html', tight: true
+        moreHref: '/players.html', tight: true, row: true
       });
       pb.body.appendChild(Hub.rail(people));
       main.appendChild(pb.box);
@@ -109,6 +109,7 @@
     function addRow(title, list, opts) {
       var o = opts || {};
       o.tight = true;
+      o.row = true;
       var b = Hub.box(title, o);
       b.body.appendChild(Hub.rail(list.slice(0, 24).map(function (g) {
         return Hub.thumb(g, members, ctx);

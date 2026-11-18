@@ -2,9 +2,9 @@
  * A game's page, in two states.
  *
  * 1. The details: picture, name, maker, one big Play button, the numbers, how to play.
- * 2. In the game: Play takes over the whole window. The site is gone, the game fills
- *    everything, and a thin strip on top holds the one way out: Leave. The browser's
- *    Back button leaves too.
+ * 2. In the game: Play takes over the whole window. Nothing of the site is left except
+ *    one big round Leave button in the corner, over the game. Pressing it (or Escape)
+ *    asks once - Leave or Keep playing - and the browser's Back button leaves too.
  *
  * The frame is never built from the query string: the id is looked up in the Hub's own
  * data and the address the server computed from owner + repo is used. Nothing loads
@@ -37,7 +37,6 @@
   }
 
   Hub.bar('explore', null);
-  Hub.footer();
 
   function nope(message) {
     document.title = 'Not here · Hub';
@@ -45,6 +44,7 @@
     document.getElementById('gp').classList.add('off');
     counts.classList.add('off');
     lower.classList.add('off');
+    about.classList.add('gp-about--one');
     var box = Hub.box('Not on the Hub');
     box.body.appendChild(Hub.el('p', '', message));
     var row = Hub.el('p', 'btn-row');
@@ -212,8 +212,8 @@
     function drawCounts(g) {
       Hub.clear(counts);
       [
-        ['Playing now', String(g.active || 0)],
-        ['Visits', String(g.visits || 0)],
+        ['Playing now', Hub.compact(g.active || 0)],
+        ['Visits', Hub.compact(g.visits || 0)],
         ['Updated', Hub.niceDate(g.updated) || 'recently'],
         ['Category', g.category || 'freestyle']
       ].forEach(function (pair) {
@@ -254,7 +254,7 @@
     if (byMaker.length) {
       any = true;
       var b1 = Hub.box('More from ' + game.owner, {
-        moreHref: '/players.html#' + encodeURIComponent(game.owner), tight: true
+        moreHref: '/players.html#' + encodeURIComponent(game.owner), tight: true, row: true
       });
       b1.body.appendChild(Hub.rail(byMaker.slice(0, 16).map(function (g) {
         return Hub.thumb(g, members, { me: me });
@@ -264,7 +264,7 @@
     if (sameCat.length) {
       any = true;
       var b2 = Hub.box('More ' + game.category + ' games', {
-        moreHref: '/explore.html?cat=' + encodeURIComponent(game.category), tight: true
+        moreHref: '/explore.html?cat=' + encodeURIComponent(game.category), tight: true, row: true
       });
       b2.body.appendChild(Hub.rail(sameCat.slice(0, 16).map(function (g) {
         return Hub.thumb(g, members, { me: me });
@@ -273,47 +273,49 @@
     }
     lower.classList.toggle('off', !any);
 
-    /* ---- in the game: the whole window, one way out ---- */
+    /* ---- in the game: the whole window, one round way out ---- */
     Hub.clear(layer);
-    var strip = Hub.el('div', 'ig-bar');
-
-    var leave = Hub.el('button', 'ig-btn ig-leave');
-    leave.type = 'button';
-    leave.appendChild(Hub.icon('left', 16));
-    leave.appendChild(Hub.el('span', '', 'Leave'));
-    strip.appendChild(leave);
-
-    var name = Hub.el('div', 'ig-title');
-    name.appendChild(Hub.el('b', '', title));
-    name.appendChild(Hub.el('span', '', 'by ' + game.owner));
-    strip.appendChild(name);
-
-    var ask = Hub.el('div', 'ig-ask off');
-    ask.appendChild(Hub.el('span', '', 'Leave this game?'));
-    var yes = Hub.el('button', 'ig-btn ig-yes', 'Leave');
-    yes.type = 'button';
-    var no = Hub.el('button', 'ig-btn', 'Keep playing');
-    no.type = 'button';
-    ask.appendChild(yes);
-    ask.appendChild(no);
-    strip.appendChild(ask);
-
-    var full = Hub.el('button', 'ig-btn ig-full');
-    full.type = 'button';
-    full.appendChild(Hub.icon('expand', 15));
-    var fullText = Hub.el('span', '', 'Full screen');
-    full.appendChild(fullText);
-    strip.appendChild(full);
-
     var host = Hub.el('div', 'ig-frame');
-    layer.appendChild(strip);
     layer.appendChild(host);
+
+    var leave = Hub.el('button', 'ig-leave');
+    leave.type = 'button';
+    leave.setAttribute('aria-label', 'Leave game');
+    leave.title = 'Leave';
+    leave.appendChild(Hub.icon('exit', 26));
+    leave.appendChild(Hub.el('span', 'w', 'Leave'));
+    layer.appendChild(leave);
+
+    /* the one question this layer ever asks, over the game it covers */
+    var ask = Hub.el('div', 'ig-ask off');
+    ask.setAttribute('role', 'dialog');
+    ask.setAttribute('aria-modal', 'true');
+    ask.setAttribute('aria-labelledby', 'igAskHead');
+    var card = Hub.el('div', 'ig-card');
+    var head = Hub.el('h2', 'ig-head', 'Leave this game?');
+    head.id = 'igAskHead';
+    card.appendChild(head);
+    var pair = Hub.el('div', 'ig-pair');
+    var yes = Hub.el('button', 'ig-big ig-yes', 'Leave');
+    yes.type = 'button';
+    var no = Hub.el('button', 'ig-big ig-no', 'Keep playing');
+    no.type = 'button';
+    pair.appendChild(yes);
+    pair.appendChild(no);
+    card.appendChild(pair);
+    ask.appendChild(card);
+    layer.appendChild(ask);
 
     function askLeave(on) {
       ask.classList.toggle('off', !on);
-      name.classList.toggle('off', on);
-      leave.classList.toggle('off', on);
-      if (on) no.focus();
+      if (on) {
+        no.focus();
+      } else if (inGame) {
+        var frame = host.firstChild;
+        if (frame && frame.focus) {
+          try { frame.focus(); } catch (e) { /* the next click focuses it */ }
+        }
+      }
     }
 
     function enter() {
@@ -374,26 +376,22 @@
     };
 
     play.addEventListener('click', enter);
-    leave.addEventListener('click', function () { askLeave(true); });
+    /* the round button opens the question, and closes it again if it is already open */
+    leave.addEventListener('click', function () {
+      askLeave(ask.classList.contains('off'));
+    });
     no.addEventListener('click', function () { askLeave(false); });
     yes.addEventListener('click', function () { leaveNow(); });
+    /* a press on the dim part, beside the card, is "keep playing" */
+    ask.addEventListener('click', function (ev) {
+      if (ev.target === ask) askLeave(false);
+    });
     window.addEventListener('popstate', function () {
       if (inGame && !(history.state && history.state.hubPlay)) out();
     });
 
-    full.addEventListener('click', function () {
-      if (document.fullscreenElement) {
-        if (document.exitFullscreen) document.exitFullscreen().catch(function () { /* fine */ });
-      } else if (layer.requestFullscreen) {
-        layer.requestFullscreen().catch(function () { /* the window is already filled */ });
-      }
-    });
-    if (!layer.requestFullscreen) full.classList.add('off');
-    document.addEventListener('fullscreenchange', function () {
-      fullText.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
-    });
     document.addEventListener('keydown', function (ev) {
-      if (!inGame || ev.key !== 'Escape' || document.fullscreenElement) return;
+      if (!inGame || ev.key !== 'Escape') return;
       askLeave(ask.classList.contains('off'));
     });
   }

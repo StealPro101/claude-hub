@@ -2,7 +2,6 @@
 (function () {
   'use strict';
   Hub.bar('join', null);
-  Hub.footer();
   Hub.data().then(function (d) {
     Hub.bar('join', d);
     Hub.beat(null);

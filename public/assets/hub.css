@@ -1,9 +1,10 @@
 /*
  * Claude Hub - a light, friendly community layout.
  *
- * One column of 942px, boxes with a grey header strip, rows of thumbnails, and a
- * single accent colour (a deep burnt orange) used for the bar, links and buttons.
- * System fonts only - no web font is loaded, so nothing blocks the first paint.
+ * The page runs left to right: content starts at the left gutter and uses the whole
+ * width, rows of thumbnails under plain bold headings, bordered boxes kept for text
+ * and forms, and a single accent colour (a deep burnt orange) for the bar, links and
+ * buttons. System fonts only - no web font is loaded, so nothing blocks the first paint.
  */
 
 :root {
@@ -19,7 +20,8 @@
   --accent-dark: #9a330a;
   --accent-soft: #fdf1ea;
   --accent-line: #f0d6c6;
-  --col: 942px;
+  --gut: 28px;
+  --read: 1100px;
   --radius: 10px;
   --sans: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
 }
@@ -48,8 +50,11 @@ a:hover { text-decoration: underline; }
 img { display: block; }
 svg { display: block; flex: none; }
 
-.col { width: 100%; max-width: var(--col); margin: 0 auto; padding: 0 16px; }
-main { flex: 1 0 auto; }
+/* the whole width, from the left gutter - nothing is centred in a narrow column */
+.col { width: 100%; max-width: none; margin: 0; padding: 0 var(--gut); }
+/* reading and form pages: a comfortable measure, still starting at the left gutter */
+.col--read { max-width: var(--read); margin: 0; }
+main { flex: 1 0 auto; padding-bottom: 48px; }
 
 .skip { position: absolute; left: -9999px; }
 .skip:focus { left: 10px; top: 10px; z-index: 80; background: var(--white);
@@ -221,46 +226,62 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 .box-body { padding: 14px; }
 .box-body.tight { padding: 10px 14px 14px; }
 
+/* a row of tiles or people: no card around it, just a heading and the row */
+.box--row { background: none; border: 0; border-radius: 0; margin-top: 28px; }
+.box--row > .box-head {
+  height: auto; background: none; border: 0; border-radius: 0; padding: 0 0 12px;
+}
+.box--row > .box-head h2 { font-size: 20px; font-weight: 700; color: var(--head); }
+.box--row > .box-head .more { font-size: 13.5px; font-weight: 600; }
+.box--row > .box-body, .box--row > .box-body.tight { padding: 0; }
+
 /* ---------- carousel ---------- */
 
 .rail { position: relative; }
 .rail-track {
-  display: flex; gap: 14px; overflow-x: auto; scroll-behavior: smooth;
+  display: flex; gap: 18px; overflow-x: auto; scroll-behavior: smooth;
   scrollbar-width: none; padding: 2px 0 4px;
 }
 .rail-track::-webkit-scrollbar { display: none; }
 
+/* the round ends of a row, level with the middle of the pictures */
 .rail-btn {
-  position: absolute; top: 44px; width: 30px; height: 30px; border-radius: 50%;
+  position: absolute; top: 40px; width: 30px; height: 30px; border-radius: 50%;
   border: 1px solid var(--line); background: var(--white); color: var(--text);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, .14); z-index: 5;
 }
 .rail-btn:hover { color: var(--accent); border-color: var(--accent); }
-.rail-btn.prev { left: -13px; }
-.rail-btn.next { right: -13px; }
+.rail-btn.prev { left: -14px; }
+.rail-btn.next { right: -14px; }
 .rail-btn[hidden] { display: none; }
 
 /* ---------- thumbnails ---------- */
 
-.thumb { width: 144px; flex: 0 0 144px; }
+.thumb { width: 176px; flex: 0 0 176px; }
 .thumb .shot {
   display: block;
-  width: 144px; height: 110px; border: 1px solid var(--line); border-radius: 4px;
+  width: 176px; height: 110px; border: 1px solid var(--line); border-radius: 8px;
   overflow: hidden; background: var(--strip); position: relative;
 }
 .thumb .shot img { width: 100%; height: 100%; object-fit: cover; }
 .thumb a.t {
-  display: block; margin-top: 6px; font-size: 15px; font-weight: 600; color: var(--accent);
+  display: block; margin-top: 7px; font-size: 15px; font-weight: 700; color: var(--head);
   line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.thumb a.t:hover { text-decoration: underline; }
 .thumb .by { font-size: 12.5px; color: var(--soft); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .thumb .by a { color: var(--soft); }
 .thumb .by a:hover { color: var(--accent); }
 .thumb { position: relative; }
-.thumb .pl { display: flex; align-items: center; gap: 5px; font-size: 12px;
-  color: var(--soft); margin-top: 2px; }
+
+/* under every published game: who is in there now, and how often it has been opened */
+.thumb .tstats { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 3px;
+  font-size: 12.5px; color: var(--soft); }
+.thumb .tstats .chunk { display: inline-flex; align-items: center; gap: 4px;
+  white-space: nowrap; }
+.thumb .tstats .chunk.live { color: #1a8a4a; font-weight: 600; }
 
 /* the corner star: out of the way until you want it, lit when it is already yours */
 .thumb .fav {
@@ -282,7 +303,7 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 }
 .thumb .flag { position: absolute; left: 0; top: 0; background: var(--accent);
   color: var(--white); font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
-  text-transform: uppercase; padding: 2px 6px; border-radius: 4px 0 4px 0; }
+  text-transform: uppercase; padding: 2px 6px; border-radius: 7px 0 4px 0; }
 
 /* a cover with no picture: the title set on a flat colour */
 .gen { width: 100%; height: 100%; display: flex; align-items: flex-end; padding: 9%;
@@ -311,7 +332,7 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 
 /* ---------- grids ---------- */
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); gap: 20px 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 24px 18px; }
 .grid .thumb, .grid .thumb .shot { width: 100%; flex: none; }
 .grid .thumb .shot { height: auto; aspect-ratio: 16 / 10; }
 
@@ -347,10 +368,13 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .msg.bad { color: #c0392b; }
 
 /* ---------- game page ----------
-   Reference for the structure: a Roblox game page. Picture at the left, and at the right
-   the name, the maker and ONE big Play button; the numbers in a row underneath. */
+   Structure borrowed from a big game site: the picture at the left, and at the right the
+   name, the maker and ONE big Play button; the numbers in a row underneath. The top block
+   is capped so the picture never grows taller than the window; the rows below it run the
+   whole width, like the rows on the home page. */
 
-.gp { display: grid; grid-template-columns: minmax(0, 1.72fr) minmax(260px, 1fr);
+.gp-top { max-width: 1480px; margin: 0; }
+.gp { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);
   gap: 24px; padding: 22px 0 0; align-items: stretch; }
 .gp-media { position: relative; aspect-ratio: 16 / 10; background: #15171c;
   border-radius: 8px; overflow: hidden; }
@@ -399,38 +423,49 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   text-transform: capitalize; overflow-wrap: anywhere; }
 
 .gp-about { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
-.gp-about--one { grid-template-columns: 1fr; }
+.gp-about--one { grid-template-columns: minmax(0, 1100px); }
 .gp-about .tbox { margin-bottom: 0; }
 .gp-about .tbox .body { font-size: 14.5px; line-height: 1.5; max-height: 300px; }
 .gp-about .tbox h2 { font-size: 14.5px; }
 
 /* ---------- in the game ----------
-   Play takes the whole window. Nothing of the site stays except one thin strip with
-   the way out, the way Roblox keeps only its menu button once you are in. */
+   Play takes the whole window: the game fills everything and the only thing left of the
+   site is one big round Leave button in the corner, on top of the game. */
 
 .in-game, .in-game body { overflow: hidden; }
-.ingame { position: fixed; inset: 0; z-index: 200; background: #0d0e11; display: flex;
-  flex-direction: column; height: 100vh; height: 100dvh; }
-.ig-bar { flex: none; height: 40px; display: flex; align-items: center; gap: 10px;
-  padding: 0 8px; background: #191b20; color: #e9eaee; font-size: 13.5px;
-  border-bottom: 1px solid #000; }
-.ig-btn { height: 28px; padding: 0 11px; border-radius: 6px; border: 1px solid #3a3e48;
-  background: #262930; color: #f1f2f5; font: inherit; font-size: 13px; font-weight: 700;
-  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; flex: none; }
-.ig-btn:hover { background: #32363f; }
-.ig-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
-.ig-leave svg { margin-left: -4px; }
-.ig-yes { background: #c2410c; border-color: #c2410c; }
-.ig-yes:hover { background: #d54d16; }
-.ig-title { min-width: 0; flex: 1 1 auto; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; }
-.ig-title b { font-weight: 700; color: #fff; }
-.ig-title span { color: #9da2b0; margin-left: 8px; }
-.ig-ask { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ig-ask > span { margin-right: 4px; font-weight: 700; white-space: nowrap; }
-.ig-full { margin-left: auto; }
-.ig-frame { flex: 1 1 auto; min-height: 0; background: #000; }
+.ingame { position: fixed; inset: 0; z-index: 200; background: #0d0e11;
+  height: 100vh; height: 100dvh; }
+.ig-frame { position: absolute; inset: 0; background: #000; }
 .ig-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+.ig-leave {
+  position: absolute; z-index: 2;
+  left: max(14px, env(safe-area-inset-left)); top: max(14px, env(safe-area-inset-top));
+  width: 68px; height: 68px; border-radius: 50%; padding: 0;
+  background: #c2410c; border: 3px solid #fff; color: #fff; cursor: pointer;
+  font: inherit; box-shadow: 0 3px 12px rgba(0, 0, 0, .45);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; transition: background .12s ease, transform .08s ease;
+}
+.ig-leave .w { font-size: 11.5px; font-weight: 800; line-height: 1; letter-spacing: .01em; }
+.ig-leave:hover { background: #d9500f; transform: scale(1.05); }
+.ig-leave:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+
+/* the one question, over the game */
+.ig-ask { position: absolute; inset: 0; z-index: 3; background: rgba(8, 9, 12, .72);
+  display: flex; align-items: center; justify-content: center; padding: 16px; }
+.ig-card { background: var(--white); border-radius: 16px; padding: 26px 26px 24px;
+  width: 100%; max-width: min(420px, calc(100vw - 32px));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5); }
+.ig-head { font-size: 22px; font-weight: 800; color: var(--head); text-align: center; }
+.ig-pair { display: flex; gap: 12px; margin-top: 22px; }
+.ig-big { flex: 1 1 0; min-height: 58px; border: 0; border-radius: 12px; color: #fff;
+  font: inherit; font-size: 18px; font-weight: 800; cursor: pointer; padding: 10px 12px; }
+.ig-big:focus-visible { outline: 3px solid var(--head); outline-offset: 3px; }
+.ig-yes { background: #c2410c; }
+.ig-yes:hover { background: #d9500f; }
+.ig-no { background: #1a9a52; }
+.ig-no:hover { background: #17a857; }
 
 /* the star on the game page: a word, not a number - a favourite is nobody else's business */
 .fav-btn {
@@ -453,8 +488,9 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .tbox .body { font-size: 13.5px; max-height: 230px; overflow: auto; }
 .tbox .empty { color: var(--soft); font-style: italic; }
 
-.lower { background: var(--band); border-top: 1px solid var(--line); margin-top: 26px; }
-.lower-in { padding: 6px 16px 28px; }
+/* the rows under a game page sit on the page itself - no band, no border */
+.lower { margin-top: 10px; }
+.lower-in { padding: 0 var(--gut); }
 
 /* ---------- profile ----------
    Structure borrowed from a player profile: one wide card with a large round picture
@@ -609,7 +645,7 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 /* the sticky row at the foot of the editor: what will happen, always in reach */
 .act-bar { position: sticky; bottom: 0; background: var(--white);
   border-top: 1px solid var(--line); box-shadow: 0 -3px 10px rgba(0, 0, 0, .06);
-  margin: 24px -16px 0; padding: 12px 16px; z-index: 20; }
+  margin: 24px calc(-1 * var(--gut)) 0; padding: 12px var(--gut); z-index: 20; }
 .act-in { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .act-in .msg { margin-top: 0; margin-left: auto; text-align: right; }
 
@@ -629,15 +665,6 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 .drop:hover, .drop.over { border-color: var(--accent); color: var(--accent); }
 .drop input[type=file] { position: absolute; left: -9999px; }
 
-/* ---------- footer ---------- */
-
-footer { background: var(--band); border-top: 1px solid var(--line); margin-top: 36px; flex: none; }
-.foot-in { padding: 26px 16px 34px; display: flex; gap: 30px; flex-wrap: wrap; }
-.foot-in h3 { font-size: 13px; color: var(--head); margin-bottom: 7px; }
-.foot-in .about { flex: 1 1 320px; max-width: 420px; font-size: 13px; }
-.foot-col { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
-.foot-note { font-size: 12.5px; color: var(--soft); margin-top: 10px; }
-
 /* ---------- sizes ---------- */
 
 @media (max-width: 820px) {
@@ -653,12 +680,19 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
 }
 
 @media (max-width: 520px) {
-  .ig-title span, .ig-full span { display: none; }
-  .ig-ask > span { display: none; }
-  .ig-bar { gap: 6px; }
+  /* a smaller circle on a phone, and the word drops off rather than crowd the icon */
+  .ig-leave { width: 56px; height: 56px; }
+  .ig-leave svg { width: 22px; height: 22px; }
+  .ig-leave .w { display: none; }
+}
+
+@media (max-width: 380px) {
+  .ig-pair { flex-direction: column; }
 }
 
 @media (max-width: 760px) {
+  .col { padding: 0 16px; }
+  .lower-in { padding: 0 16px; }
   .burger { display: flex; }
   .bar-links {
     display: none; position: absolute; top: 50px; left: 0; right: 0;
@@ -695,13 +729,16 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
   .mg-acts { grid-column: 1 / -1; justify-content: flex-start; gap: 12px; }
   .page-head h1 { font-size: 22px; }
   .page-head .btn { margin-left: auto; }
+
+  /* a finger scrolls a row, so the round ends are not needed and not in the way */
+  .rail-btn { display: none; }
+  .box--row > .box-head h2 { font-size: 17px; }
 }
 
 @media (max-width: 460px) {
   .brand { font-size: 16px; }
   .bar-search input { width: 104px; }
-  .grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 16px 12px; }
-  .foot-in { gap: 20px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px 12px; }
 }
 
 /* presence dots, badges and the extra bits the rows need */
@@ -723,9 +760,6 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
   color: var(--white); border-radius: 9px; font-size: 10.5px; font-weight: 700;
   padding: 1px 7px; vertical-align: 1px; }
 
-.thumb .pl { gap: 5px; }
-.thumb .dotsep { color: var(--line); }
-
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: 18px 10px; }
 .people-grid .person { width: auto; flex: none; }
@@ -736,6 +770,10 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
 /* look round 3: breathing room on a phone, and a little more room for "Playing ..." */
 .person { width: 104px; flex: 0 0 104px; }
 .bar-right .join { white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .act-bar { margin: 24px -16px 0; padding: 12px 16px; }
+}
 
 @media (max-width: 560px) {
   .act-bar { padding: 10px 16px; }

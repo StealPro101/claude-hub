@@ -33,7 +33,6 @@
   }
 
   Hub.bar('mygames', null);
-  Hub.footer();
 
   Hub.data().then(start).catch(function () { Hub.show('signedOut', true); });
 
@@ -183,7 +182,8 @@
     mid.appendChild(Hub.el('div', 'mg-state' + (isDraft(game) ? ' draft' : ''),
       isDraft(game)
         ? 'Draft — only you can see this'
-        : 'Shared · ' + Hub.count(game.visits || 0, 'visit')));
+        : 'Shared · ' + Hub.compact(game.visits || 0) +
+          ((game.visits || 0) === 1 ? ' visit' : ' visits')));
     mid.appendChild(Hub.el('div', 'mg-when',
       'changed ' + (Hub.niceDate(game.updated) || 'recently')));
     r.appendChild(mid);

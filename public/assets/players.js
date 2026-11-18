@@ -13,7 +13,6 @@
   var hub = null;
 
   Hub.bar('players', null);
-  Hub.footer();
 
   Hub.data().then(function (d) {
     hub = d;
@@ -109,7 +108,7 @@
     var nums = document.getElementById('pNums');
     Hub.clear(nums);
     num(nums, list.length, list.length === 1 ? 'Game shared' : 'Games shared');
-    num(nums, list.reduce(function (n, g) { return n + (g.visits || 0); }, 0), 'Visits');
+    num(nums, Hub.compact(list.reduce(function (n, g) { return n + (g.visits || 0); }, 0)), 'Visits');
     num(nums, Hub.monthYear(m.joined) || '—', 'Joined');
 
     /* their GitHub bio, as plain text - no box around nothing */
