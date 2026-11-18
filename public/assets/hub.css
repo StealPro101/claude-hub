@@ -249,8 +249,28 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   text-overflow: ellipsis; white-space: nowrap; }
 .thumb .by a { color: var(--soft); }
 .thumb .by a:hover { color: var(--accent); }
-.thumb .loves { display: flex; align-items: center; gap: 4px; font-size: 12px;
+.thumb { position: relative; }
+.thumb .pl { display: flex; align-items: center; gap: 5px; font-size: 12px;
   color: var(--soft); margin-top: 2px; }
+
+/* the corner star: out of the way until you want it, lit when it is already yours */
+.thumb .fav {
+  position: absolute; right: 5px; top: 5px; width: 27px; height: 27px; padding: 0;
+  border: 0; border-radius: 50%; background: rgba(255, 255, 255, .93); color: #8d93a3;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25); opacity: 0;
+  transition: opacity .12s ease, color .12s ease;
+}
+.thumb:hover .fav, .thumb .fav:focus-visible, .thumb .fav.on { opacity: 1; }
+.thumb .fav:hover { color: var(--accent); }
+.thumb .fav.on { color: var(--accent); }
+.thumb .fav[disabled] { cursor: default; }
+
+/* on a touch screen there is no hover, so it is always there - small and quiet */
+@media (hover: none) {
+  .thumb .fav { opacity: 1; width: 22px; height: 22px; background: rgba(255, 255, 255, .88); }
+  .thumb .fav svg { width: 13px; height: 13px; }
+}
 .thumb .flag { position: absolute; left: 0; top: 0; background: var(--accent);
   color: var(--white); font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; padding: 2px 6px; border-radius: 4px 0 4px 0; }
@@ -354,10 +374,10 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .dot-live { width: 8px; height: 8px; border-radius: 50%; background: #1a9a52; flex: none; }
 .gp-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px;
   padding-top: 12px; border-top: 1px solid var(--line); }
-.gp-acts .love-btn { margin-right: auto; font-size: 15px; }
+.gp-acts .fav-btn { margin-right: auto; }
 .gp-hint { margin-top: 8px; }
 
-.gp-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0;
+.gp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0;
   margin-top: 26px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .gp-stats > div { padding: 13px 8px 14px; text-align: center; }
 .gp-stats .k { font-size: 12px; color: var(--soft); font-weight: 500; }
@@ -398,14 +418,18 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .ig-frame { flex: 1 1 auto; min-height: 0; background: #000; }
 .ig-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
 
-.love-btn {
-  display: inline-flex; align-items: center; gap: 6px; background: none; border: 0;
-  cursor: pointer; font: inherit; font-size: 13.5px; color: var(--text); padding: 2px;
+/* the star on the game page: a word, not a number - a favourite is nobody else's business */
+.fav-btn {
+  display: inline-flex; align-items: center; gap: 7px; background: var(--white);
+  border: 1px solid var(--line); border-radius: 5px; cursor: pointer; font: inherit;
+  font-size: 13.5px; font-weight: 600; color: var(--text); padding: 7px 14px;
 }
-.love-btn svg { color: var(--soft); }
-.love-btn:hover svg, .love-btn.on svg { color: #d94f4f; }
-.love-btn.on { color: var(--head); font-weight: 600; }
-.love-btn[disabled] { cursor: default; opacity: .9; }
+.fav-btn svg { color: var(--soft); }
+.fav-btn:hover { border-color: #c6a07f; color: var(--head); }
+.fav-btn:hover svg { color: var(--accent); }
+.fav-btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-dark); }
+.fav-btn.on svg { color: var(--accent); }
+.fav-btn[disabled] { cursor: default; opacity: .6; }
 
 .tbox {
   background: var(--accent-soft); border: 1px solid var(--accent-line);
@@ -558,7 +582,7 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
   color: var(--white); border-radius: 9px; font-size: 10.5px; font-weight: 700;
   padding: 1px 7px; vertical-align: 1px; }
 
-.thumb .loves { gap: 5px; }
+.thumb .pl { gap: 5px; }
 .thumb .dotsep { color: var(--line); }
 
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));

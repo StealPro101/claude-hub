@@ -92,21 +92,27 @@
 
     document.getElementById('pBio').textContent = m.bio || 'Nothing here yet.';
     var list = gamesOf(m.login);
+    var ctx = { me: hub.me };
     document.getElementById('pStats').textContent =
       Hub.count(list.length, 'game') + ' shared · ' +
-      Hub.count(list.reduce(function (n, g) { return n + (g.loves || 0); }, 0), 'love');
+      Hub.count(list.reduce(function (n, g) { return n + (g.visits || 0); }, 0), 'visit');
 
     var pg = document.getElementById('pGames');
     Hub.clear(pg);
     document.getElementById('pEmpty').textContent = list.length ? '' : 'Nothing shared yet.';
-    list.forEach(function (g) { pg.appendChild(Hub.thumb(g, hub.members)); });
+    list.forEach(function (g) { pg.appendChild(Hub.thumb(g, hub.members, ctx)); });
 
-    var lovedIds = m.loved || [];
-    var loved = published().filter(function (g) { return lovedIds.indexOf(g.id) >= 0; });
-    Hub.show('lovedBox', loved.length > 0);
-    var pl = document.getElementById('pLoved');
-    Hub.clear(pl);
-    loved.forEach(function (g) { pl.appendChild(Hub.thumb(g, hub.members)); });
+    /* favourites are private: only ever on your own profile */
+    var isMe = Boolean(hub.me && hub.me.login === m.login);
+    var ids = isMe ? ((hub.me && hub.me.favorites) || []) : [];
+    var favs = [];
+    ids.forEach(function (id) {
+      published().forEach(function (g) { if (g.id === id) favs.push(g); });
+    });
+    Hub.show('favBox', isMe && favs.length > 0);
+    var pf = document.getElementById('pFavs');
+    Hub.clear(pf);
+    favs.forEach(function (g) { pf.appendChild(Hub.thumb(g, hub.members, ctx)); });
   }
 
   function route() {

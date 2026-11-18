@@ -128,33 +128,43 @@
     var nowLine = Hub.el('div', 'gp-now');
     info.appendChild(nowLine);
 
+    /*
+     * The star. A favourite is private and uncounted - the button says whether this
+     * game is on YOUR list and nothing more.
+     */
     var acts = Hub.el('div', 'gp-acts');
-    var heart = Hub.el('button', 'love-btn' + (game.lovedByMe ? ' on' : ''));
-    heart.type = 'button';
-    heart.appendChild(Hub.icon('heart', 18));
-    heart.appendChild(Hub.el('span', 'n', String(game.loves || 0)));
+    var star = Hub.el('button', 'fav-btn' + (game.favorite ? ' on' : ''));
+    star.type = 'button';
+    var starWord = Hub.el('span', 'w', game.favorite ? 'Favorited' : 'Favorite');
+    function paintStar() {
+      Hub.clear(star);
+      star.appendChild(Hub.starIcon(game.favorite, 18));
+      starWord.textContent = game.favorite ? 'Favorited' : 'Favorite';
+      star.appendChild(starWord);
+      star.classList.toggle('on', Boolean(game.favorite));
+      star.setAttribute('aria-pressed', game.favorite ? 'true' : 'false');
+    }
+    paintStar();
     if (!me) {
-      heart.disabled = true;
-      heart.title = 'Sign in to love a game';
+      star.disabled = true;
+      starWord.textContent = 'Sign in to favorite';
+      star.title = 'Favorites are private to you';
     } else if (game.status === 'draft') {
-      heart.disabled = true;
-      heart.title = 'Publish it first';
+      star.disabled = true;
+      star.title = 'Publish it first';
     } else {
-      heart.addEventListener('click', function () {
-        var on = !heart.classList.contains('on');
-        heart.disabled = true;
-        Hub.post('/api/games/love', { id: game.id, on: on }).then(function (r) {
-          heart.disabled = false;
+      star.addEventListener('click', function () {
+        var want = !game.favorite;
+        star.disabled = true;
+        Hub.post('/api/games/favorite', { id: game.id, on: want }).then(function (r) {
+          star.disabled = false;
           if (!r.ok) return;
-          heart.classList.toggle('on', r.lovedByMe);
-          heart.querySelector('.n').textContent = String(r.loves);
-          game.loves = r.loves;
-          game.lovedByMe = r.lovedByMe;
-          drawCounts(game);
+          game.favorite = Boolean(r.favorite);
+          paintStar();
         });
       });
     }
-    acts.appendChild(heart);
+    acts.appendChild(star);
 
     var copy = Hub.el('button', 'btn btn--grey btn--sm');
     copy.type = 'button';
@@ -187,14 +197,13 @@
     });
     acts.appendChild(report);
     info.appendChild(acts);
-    if (!me) info.appendChild(Hub.el('div', 'small muted gp-hint', 'Sign in to love or report a game.'));
+    if (!me) info.appendChild(Hub.el('div', 'small muted gp-hint', 'Sign in to favorite a game.'));
 
     /* ---- the numbers ---- */
     function drawCounts(g) {
       Hub.clear(counts);
       [
         ['Playing now', String(g.active || 0)],
-        ['Loves', String(g.loves || 0)],
         ['Visits', String(g.visits || 0)],
         ['Updated', Hub.niceDate(g.updated) || 'recently'],
         ['Category', g.category || 'freestyle']
@@ -239,7 +248,7 @@
         moreHref: '/players.html#' + encodeURIComponent(game.owner), tight: true
       });
       b1.body.appendChild(Hub.rail(byMaker.slice(0, 16).map(function (g) {
-        return Hub.thumb(g, members);
+        return Hub.thumb(g, members, { me: me });
       })));
       lowerIn.appendChild(b1.box);
     }
@@ -249,7 +258,7 @@
         moreHref: '/explore.html?cat=' + encodeURIComponent(game.category), tight: true
       });
       b2.body.appendChild(Hub.rail(sameCat.slice(0, 16).map(function (g) {
-        return Hub.thumb(g, members);
+        return Hub.thumb(g, members, { me: me });
       })));
       lowerIn.appendChild(b2.box);
     }
@@ -343,7 +352,6 @@
           if (g2) {
             game.active = g2.active;
             game.visits = g2.visits;
-            game.loves = g2.loves;
             drawCounts(game);
           }
         })

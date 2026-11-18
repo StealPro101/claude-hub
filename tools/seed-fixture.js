@@ -131,8 +131,9 @@ const MEMBERS = [
 ];
 
 function build(count) {
-  const state = { v: 4, members: {}, games: {}, house: {}, bans: {}, tombs: {}, settings: null };
+  const state = { v: 5, members: {}, games: {}, house: {}, bans: {}, tombs: {}, settings: null };
   const blobs = {};
+  const favorites = {};
 
   state.settings = {
     round: { round: 3, category: 'horror', note: 'make something that makes us jump' },
@@ -153,8 +154,11 @@ function build(count) {
       url: 'https://github.com/' + m.login,
       joined: '2026-11-0' + (MEMBERS.indexOf(m) + 1),
       seen: '2026-11-16',
-      lastSeen: m.id === 7002 ? new Date(Date.now() - 3 * 3600000).toISOString() : null
+      lastSeen: m.id === 7002 ? new Date(Date.now() - 3 * 3600000).toISOString() : null,
+      /* a private list each, newest first - filled in below once the games exist */
+      favorites: []
     };
+    favorites[m.id] = [];
   }
 
   for (let i = 0; i < count; i++) {
@@ -164,8 +168,9 @@ function build(count) {
     const repo = (n[0] + suffix).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
     const withCover = i % 4 !== 3;
     const bytes = withCover ? coverPng(i) : null;
-    /* a few games are well loved, the rest are not - like a real little hub */
-    const loves = [7001, 7002, 9001].slice(0, (i * 7) % 4);
+    /* the owner and one friend keep a few private favourites, as a real hub would */
+    if (i % 3 === 1) favorites[9001].unshift(m.login + '/' + repo);
+    if (i % 4 === 0) favorites[7001].unshift(m.login + '/' + repo);
     state.games[m.id + '/' + repo] = {
       id: m.login + '/' + repo,
       ownerId: m.id,
@@ -185,13 +190,16 @@ function build(count) {
       source: i % 3 === 0 ? 'topic' : 'manual',
       status: 'published',
       locked: true,
-      loves: loves,
       cover: bytes ? { v: 'fx' + i, type: 'image/png' } : null,
       hidden: false,
       featured: i === 1,
       metaAt: '2026-11-16T00:00:00Z'
     };
     if (bytes) blobs['cover:' + m.id + '/' + repo] = { type: 'image/png', b64: bytes.toString('base64') };
+  }
+
+  for (const id of Object.keys(favorites)) {
+    if (state.members[id]) state.members[id].favorites = favorites[id].slice(0, 100);
   }
 
   return { data: { state: JSON.stringify(state) }, blobs: blobs, state: state };

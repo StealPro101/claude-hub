@@ -6,14 +6,14 @@
   var found = document.getElementById('found');
   var empty = document.getElementById('empty');
   var sort = document.getElementById('sort');
-  var state = { games: [], members: [], cat: 'all', q: '', sort: 'new' };
+  var state = { games: [], members: [], cat: 'all', q: '', sort: 'new', ctx: null };
 
   try {
     var params = new URLSearchParams(location.search);
     state.q = (params.get('q') || '').trim().toLowerCase().slice(0, 60);
     state.cat = (params.get('cat') || 'all').toLowerCase().slice(0, 40);
     var s = params.get('sort');
-    if (s === 'loved' || s === 'az' || s === 'new') state.sort = s;
+    if (s === 'played' || s === 'az' || s === 'new') state.sort = s;
   } catch (e) { /* no query */ }
   sort.value = state.sort;
 
@@ -23,6 +23,7 @@
   Hub.data().then(function (d) {
     Hub.bar('explore', d);
     Hub.beat(null);
+    state.ctx = { me: d.me };
     state.games = (d.games || []).filter(function (g) { return g.status !== 'draft'; });
     state.members = d.members || [];
     drawTabs();
@@ -65,8 +66,8 @@
 
   function render() {
     var list = state.games.filter(matches);
-    if (state.sort === 'loved') {
-      list.sort(function (a, b) { return (b.loves || 0) - (a.loves || 0); });
+    if (state.sort === 'played') {
+      list.sort(function (a, b) { return (b.visits || 0) - (a.visits || 0); });
     } else if (state.sort === 'az') {
       list.sort(function (a, b) { return String(a.title).localeCompare(String(b.title)); });
     } else {
@@ -78,7 +79,9 @@
       Hub.count(list.length, 'game');
     Hub.clear(grid);
     empty.textContent = list.length ? '' : 'No games match that.';
-    for (var i = 0; i < list.length; i++) grid.appendChild(Hub.thumb(list[i], state.members));
+    for (var i = 0; i < list.length; i++) {
+      grid.appendChild(Hub.thumb(list[i], state.members, state.ctx));
+    }
   }
 
   sort.addEventListener('change', function () {

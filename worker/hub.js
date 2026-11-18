@@ -1,5 +1,5 @@
 /*
- * The Hub itself: settings, members, games, loves, and the 15-minute refresh that
+ * The Hub itself: settings, members, games, favourites, and the 15-minute refresh that
  * picks up games a member (or their Claude) tagged.
  *
  * Everything here reads and writes ONE document through state.js - never a list() on
@@ -22,7 +22,6 @@ export const DRAFT = 'draft';
 export const PUBLISHED = 'published';
 export const FAVORITES_PER_HOUR = 60;
 export const MAX_FAVORITES = 100;
-export const LOVES_PER_HOUR = 60;
 export const REPORTS_PER_DAY = 5;
 export const COVER_PER_HOUR = 12;
 const REFRESH_BATCH = 4;
@@ -75,7 +74,6 @@ export function houseGames(env) {
     url: base + 'games/' + g.slug + '/',
     repoUrl: repoUrl(owner, repo),
     stars: 0,
-    loves: [],
     updated: g.updated,
     house: true
   }));
@@ -139,10 +137,15 @@ export async function sweepHubRepo(env, store, state) {
   return keys.length;
 }
 
-/* What index.js hangs on the store, so every write sweeps first. */
+/*
+ * What index.js hangs on the store, so every write tidies first: the old loves become
+ * favourites once and for all, and the Hub's own repo goes.
+ */
 export function storeSweeper(env) {
-  return function (state, store) {
-    return sweepHubRepo(env, store, state);
+  return async function (state, store) {
+    const moved = migrateLoves(state);
+    const dropped = await sweepHubRepo(env, store, state);
+    return moved + dropped;
   };
 }
 
@@ -321,7 +324,6 @@ export function gameRecord(opts) {
     locked: Boolean(opts.locked),
     howto: typeof opts.howto === 'string' ? opts.howto : '',
     notes: typeof opts.notes === 'string' ? opts.notes : '',
-    loves: Array.isArray(opts.loves) ? opts.loves.filter(isId) : [],
     cover: opts.cover || null,
     hidden: Boolean(opts.hidden),
     featured: Boolean(opts.featured),
@@ -545,50 +547,73 @@ export async function pruneFavorites(env, store) {
   });
 }
 
-/* ---------- loves ---------- */
-
-function lovesOf(record) {
-  return Array.isArray(record && record.loves) ? record.loves.filter(isId) : [];
-}
-
-/* One write, and only when something actually changed: pressing love twice is free. */
-export async function setLove(env, store, id, memberId, on) {
+/*
+ * Turning a favourite on or off. One write, and only when something really changed, so
+ * pressing the star twice costs nothing. The answer carries no count of any kind.
+ */
+export async function setFavorite(env, store, id, memberId, on) {
   if (!isId(memberId)) return { ok: false, error: 'sign in first' };
-  const wanted = String(id || '');
-
-  if (wanted.indexOf('house/') === 0) {
-    const slug = wanted.slice('house/'.length);
-    if (!houseGames(env).find((g) => g.id === wanted)) return { ok: false, error: 'no such game' };
-    return update(store, (s) => {
-      const before = s.house[slug] || {};
-      const loves = lovesOf(before);
-      const next = on
-        ? (loves.indexOf(memberId) < 0 ? loves.concat([memberId]) : loves)
-        : loves.filter((x) => x !== memberId);
-      const same = next.length === loves.length;
-      if (!same) s.house[slug] = Object.assign({}, before, { loves: next });
-      const answer = { ok: true, loves: next.length, lovedByMe: next.indexOf(memberId) >= 0 };
-      return same ? noWrite(answer) : answer;
-    });
-  }
+  const wanted = clean(id, 150);
+  if (!wanted) return { ok: false, error: 'no such game' };
 
   return update(store, (s) => {
-    const key = Object.keys(s.games).find((k) =>
-      s.games[k] && String(s.games[k].id).toLowerCase() === wanted.toLowerCase());
-    if (!key) return noWrite({ ok: false, error: 'no such game' });
-    const game = s.games[key];
-    if (!isPublished(game) || game.hidden) {
-      return noWrite({ ok: false, error: 'that game is not published' });
+    const member = s.members[String(Number(memberId))];
+    if (!member) return noWrite({ ok: false, error: 'not a member' });
+
+    let gameId = null;
+    if (wanted.toLowerCase().indexOf('house/') === 0) {
+      const house = houseGames(env).find((g) => g.id.toLowerCase() === wanted.toLowerCase());
+      if (house) gameId = house.id;
+    } else {
+      const key = Object.keys(s.games).find((k) =>
+        s.games[k] && String(s.games[k].id).toLowerCase() === wanted.toLowerCase());
+      const game = key ? s.games[key] : null;
+      if (game && (!isPublished(game) || game.hidden)) {
+        return noWrite({ ok: false, error: 'that game is not published' });
+      }
+      if (game) gameId = game.id;
     }
-    const loves = lovesOf(game);
-    const next = on
-      ? (loves.indexOf(memberId) < 0 ? loves.concat([memberId]) : loves)
-      : loves.filter((x) => x !== memberId);
-    const same = next.length === loves.length;
-    if (!same) s.games[key] = Object.assign({}, game, { loves: next });
-    const answer = { ok: true, loves: next.length, lovedByMe: next.indexOf(memberId) >= 0 };
+    if (!gameId) return noWrite({ ok: false, error: 'no such game' });
+
+    const favs = favoritesOf(member);
+    const low = gameId.toLowerCase();
+    const has = favs.some((x) => x.toLowerCase() === low);
+    let next = favs;
+    if (on && !has) next = [gameId].concat(favs).slice(0, MAX_FAVORITES);
+    if (!on && has) next = favs.filter((x) => x.toLowerCase() !== low);
+    const same = next === favs;
+    if (!same) member.favorites = next;
+    const answer = { ok: true, favorite: next.some((x) => x.toLowerCase() === low) };
     return same ? noWrite(answer) : answer;
   });
+}
+
+/*
+ * The one-time move from loves to favourites, run on the next write of the document.
+ * Every member who loved a game ends up with that game in their own private list, and
+ * the loves fields - the counted thing - are dropped for good.
+ */
+export function migrateLoves(state) {
+  let changed = 0;
+  const add = (memberId, gameId) => {
+    const rec = state.members[String(Number(memberId))];
+    if (!rec) return;
+    const favs = favoritesOf(rec);
+    if (favs.some((x) => x.toLowerCase() === gameId.toLowerCase())) return;
+    rec.favorites = favs.concat([gameId]).slice(0, MAX_FAVORITES);
+  };
+  const take = (record, gameId) => {
+    if (!record || !Array.isArray(record.loves)) return;
+    for (const id of record.loves) if (isId(id)) add(id, gameId);
+    delete record.loves;
+    changed++;
+  };
+  for (const key of Object.keys(state.games)) {
+    const g = state.games[key];
+    if (g) take(g, g.id);
+  }
+  for (const slug of Object.keys(state.house)) take(state.house[slug], 'house/' + slug);
+  return changed;
 }
 
 /* A report is a line in the owner's activity log and nothing else. */
@@ -615,7 +640,6 @@ export async function houseGamesWithEdits(env, store) {
       category: allowedCategory(e.category) || g.category,
       howto: typeof e.howto === 'string' ? e.howto : '',
       notes: typeof e.notes === 'string' ? e.notes : '',
-      loves: Array.isArray(e.loves) ? e.loves : [],
       cover: e.cover || null
     });
   });
@@ -623,8 +647,11 @@ export async function houseGamesWithEdits(env, store) {
 
 /* ---------- what the pages read ---------- */
 
-export function publicGame(g, meId) {
-  const loves = lovesOf(g);
+/*
+ * `favs` is the set of game ids (lowercased) the person asking has in their own
+ * favourites - nobody else's, ever, and never a number.
+ */
+export function publicGame(g, favs) {
   return {
     id: g.id,
     owner: g.owner,
@@ -642,8 +669,7 @@ export function publicGame(g, meId) {
     featured: Boolean(g.featured),
     house: Boolean(g.house),
     status: statusOf(g),
-    loves: loves.length,
-    lovedByMe: meId ? loves.indexOf(Number(meId)) >= 0 : false,
+    favorite: Boolean(favs && favs.has(String(g.id).toLowerCase())),
     active: 0,
     visits: 0,
     cover: coverUrl(g.house ? 'house' : String(Number(g.ownerId)), g.repo, g.cover)
@@ -660,6 +686,9 @@ function presenceOf(member, snap, nowMs) {
 export async function hubPayload(env, store, session) {
   const settings = await getSettings(store, env);
   const state = await getState(store);
+  /* a document still in the old shape reads as if it had already moved; the move
+     itself is written the next time anything writes */
+  migrateLoves(state);
   const members = listOf(state.members)
     .filter((m) => m && isId(m.id) && isLogin(m.login))
     .sort((a, b) => String(b.joined || '').localeCompare(String(a.joined || '')) ||
@@ -677,21 +706,19 @@ export async function hubPayload(env, store, session) {
   const admin = Boolean(session && isAdminId(env, session.id));
   const onShow = stored.filter((g) => !g.hidden && isPublished(g));
   const forMe = stored.filter((g) => !isPublished(g) && (admin || Number(g.ownerId) === mine));
-  const games = onShow.concat(forMe).map((g) => publicGame(g, mine))
-    .concat(house.map((g) => publicGame(g, mine)));
+
+  /*
+   * Favourites are private. Only the person asking is told anything at all, and only
+   * about their own list - no count, no names, nothing on anybody else's record.
+   */
+  const myFavorites = favoritesOf(meRec);
+  const favs = new Set(myFavorites.map((id) => id.toLowerCase()));
+  const games = onShow.concat(forMe).map((g) => publicGame(g, favs))
+    .concat(house.map((g) => publicGame(g, favs)));
 
   for (const g of games) {
     g.active = Number(snap.active[g.id]) || 0;
     g.visits = Number(snap.visits[g.id]) || 0;
-  }
-
-  /* Who loves what is public on a profile, by design - that is the "Loved games" box. */
-  const lovedBy = new Map();
-  for (const g of onShow.concat(house)) {
-    for (const id of lovesOf(g)) {
-      if (!lovedBy.has(id)) lovedBy.set(id, []);
-      lovedBy.get(id).push(g.id);
-    }
   }
 
   /* a profile counts what the world can see, never someone's drafts */
@@ -719,14 +746,16 @@ export async function hubPayload(env, store, session) {
   }
 
   return {
-    v: 4,
+    v: 5,
     built: nowIso(),
     round: settings.round,
     categories: CATEGORIES.concat(
       roundCat && CATEGORIES.indexOf(roundCat) < 0 ? [roundCat] : []
     ),
     me: session ? {
-      id: session.id, login: session.login, admin: admin
+      id: session.id, login: session.login, admin: admin,
+      /* my own list, newest first, so the Favourites row can be pinned on top */
+      favorites: myFavorites
     } : null,
     members: members.map((m) => ({
       login: m.login,
@@ -737,7 +766,6 @@ export async function hubPayload(env, store, session) {
       url: m.url,
       joined: m.joined,
       games: counts.get(m.login.toLowerCase()) || 0,
-      loved: lovedBy.get(m.id) || [],
       hidePresence: Boolean(m.hidePresence),
       presence: presenceOf(m, snap, nowMs)
     })),
@@ -756,6 +784,13 @@ export async function refresh(env, store, opts) {
   const roundCategory = settings.round && settings.round.category;
   const members = (await listMembers(store)).slice().sort((a, b) => a.id - b.id);
   const summary = { members: members.length, checked: 0, added: 0, removed: 0, updated: 0, errors: 0 };
+
+  /* before anything else: a game record this run rebuilds must not take the old loves
+     down with it, so they become favourites first */
+  summary.moved = await update(store, (s) => {
+    const n = migrateLoves(s);
+    return n ? n : noWrite(0);
+  });
 
   if (!members.length) {
     await update(store, (s) => {
@@ -784,7 +819,6 @@ export async function refresh(env, store, opts) {
     }
   }
 
-  summary.loves = await pruneLoves(env, store, await listMembers(store));
   summary.favorites = await pruneFavorites(env, store);
   summary.hubRepo = await purgeHubRepo(env, store);
 
@@ -796,33 +830,6 @@ export async function refresh(env, store, opts) {
   });
   summary.used = budget.used;
   return summary;
-}
-
-/* Drops loves belonging to ids that are not members any more. */
-export async function pruneLoves(env, store, members) {
-  const alive = new Set((members || []).map((m) => Number(m.id)));
-  return update(store, (s) => {
-    let changed = 0;
-    for (const key of Object.keys(s.games)) {
-      const g = s.games[key];
-      const loves = lovesOf(g);
-      const kept = loves.filter((id) => alive.has(Number(id)));
-      if (kept.length !== loves.length) {
-        s.games[key] = Object.assign({}, g, { loves: kept });
-        changed++;
-      }
-    }
-    for (const slug of Object.keys(s.house)) {
-      const h = s.house[slug];
-      const loves = lovesOf(h);
-      const kept = loves.filter((id) => alive.has(Number(id)));
-      if (kept.length !== loves.length) {
-        s.house[slug] = Object.assign({}, h, { loves: kept });
-        changed++;
-      }
-    }
-    return changed ? changed : noWrite(0);
-  });
 }
 
 const MISSES_BEFORE_HIDING = 3;
@@ -967,7 +974,7 @@ async function refreshMember(env, store, gh, budget, member, topic, roundCategor
         stars: r.stargazers_count, updated: r.pushed_at,
         source: current ? current.source : 'topic',
         status: current ? statusOf(current) : DRAFT,
-        locked: base.locked, howto: base.howto, notes: base.notes, loves: base.loves,
+        locked: base.locked, howto: base.howto, notes: base.notes,
         cover: base.cover, hidden: base.hidden, featured: base.featured, added: base.added
       });
       /* Once a person has typed the details, hub.json stops having a say. */

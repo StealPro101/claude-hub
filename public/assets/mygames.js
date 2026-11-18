@@ -83,8 +83,7 @@
     box.appendChild(Hub.el('div', 'name', game.title || 'Untitled'));
     box.appendChild(Hub.el('div', 'sub', game.id + ' · ' + (game.category || 'freestyle')));
     if (game.status !== 'draft') {
-      box.appendChild(Hub.el('div', 'sub',
-        Hub.count(game.loves || 0, 'love') + ' · ' + Hub.count(game.visits || 0, 'visit')));
+      box.appendChild(Hub.el('div', 'sub', Hub.count(game.visits || 0, 'visit')));
     }
     who.appendChild(box);
     r.appendChild(who);

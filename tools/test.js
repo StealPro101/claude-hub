@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import { handle } from '../worker/index.js';
 import { memoryStore } from '../worker/store.js';
-import { getState, update } from '../worker/state.js';
+import { getState, update, listOf } from '../worker/state.js';
 import { PresenceCore } from '../worker/presence.js';
 import { fakePresence, fakeStorage } from './fake-presence.js';
 import {
@@ -690,7 +690,7 @@ async function testMisc() {
   eq('an unknown api path is a 404', unknown.res.status, 404);
 
   const payload = await hubPayload(env, store, null);
-  eq('the payload says version 4', payload.v, 4);
+  eq('the payload says version 5', payload.v, 5);
   eq('signed out there is no me', payload.me, null);
   eq('house games are in the payload', payload.games.length, HOUSE_GAMES.length);
 
@@ -1183,82 +1183,137 @@ async function testCovers() {
   eq('a member cannot', byMember.res.status, 403);
 }
 
-/* ---------- 14. loves, reports, how-to text ---------- */
+/* ---------- 14. favourites, reports, how-to text ---------- */
 
-async function testLoves() {
-  console.log('loves and reports');
+async function testFavorites() {
+  console.log('favourites and reports');
   const { env, store } = world();
   const mine = await joined('friend-one', env, store);
   const other = await joined('friend-two', env, store);
   const admin = await joined('sp101-admin', env, store);
   await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
 
-  const draftLove = await call(env, '/api/games/love', {
+  const draftFav = await call(env, '/api/games/favorite', {
     body: { id: 'friend-one/plain-game', on: true }, cookie: other
   });
-  eq('a draft cannot be loved', draftLove.res.status, 400);
+  eq('a draft cannot be favourited', draftFav.res.status, 400);
 
   await call(env, '/api/games/meta', { body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine });
   await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
 
-  const anon = await call(env, '/api/games/love', { body: { id: 'friend-one/plain-game', on: true } });
-  eq('a signed-out visitor cannot love', anon.res.status, 401);
+  const anon = await call(env, '/api/games/favorite', { body: { id: 'friend-one/plain-game', on: true } });
+  eq('a signed-out visitor cannot favourite', anon.res.status, 401);
 
-  const love = await call(env, '/api/games/love', {
+  const gone = await call(env, '/api/games/love', {
     body: { id: 'friend-one/plain-game', on: true }, cookie: other
   });
-  eq('a member can love a published game', love.res.status, 200);
-  eq('and the count comes back', love.body.loves, 1);
-  eq('marked as mine', love.body.lovedByMe, true);
+  eq('the old love route is gone for good', gone.res.status, 404);
 
-  const again = await call(env, '/api/games/love', {
+  const fav = await call(env, '/api/games/favorite', {
     body: { id: 'friend-one/plain-game', on: true }, cookie: other
   });
-  eq('loving twice changes nothing', again.body.loves, 1);
+  eq('a member can favourite a published game', fav.res.status, 200);
+  eq('and is told it is on their list', fav.body.favorite, true);
+  ok('with no count of any kind in the answer',
+    fav.text.indexOf('loves') < 0 && fav.text.indexOf('count') < 0, fav.text);
 
+  const again = await call(env, '/api/games/favorite', {
+    body: { id: 'friend-one/plain-game', on: true }, cookie: other
+  });
+  eq('favouriting twice changes nothing', again.body.favorite, true);
+  eq('and it is stored once', (await memberOf(store, 7002)).favorites.length, 1);
+
+  /* ---- it is private ---- */
   const seen = await call(env, '/api/hub', { cookie: other });
   const g = seen.body.games.find((x) => x.id === 'friend-one/plain-game');
-  eq('the arcade shows the count', g.loves, 1);
-  eq('and that this member loves it', g.lovedByMe, true);
+  eq('their own payload marks it as a favourite', g.favorite, true);
+  eq('and lists it under me', (seen.body.me.favorites || []).join(), 'friend-one/plain-game');
+
+  const ownerView = await call(env, '/api/hub', { cookie: mine });
+  eq('the maker of the game is told nothing about it',
+    ownerView.body.games.find((x) => x.id === 'friend-one/plain-game').favorite, false);
+  eq('and has an empty list of their own', (ownerView.body.me.favorites || []).length, 0);
+  const adminView = await call(env, '/api/hub', { cookie: admin });
+  eq('not even the Hub owner is told', adminView.body.games
+    .find((x) => x.id === 'friend-one/plain-game').favorite, false);
   const strangerView = await call(env, '/api/hub');
   const g2 = strangerView.body.games.find((x) => x.id === 'friend-one/plain-game');
-  eq('a stranger sees the count', g2.loves, 1);
-  eq('but nothing about who', g2.lovedByMe, false);
-  ok('and no list of names anywhere in the payload',
-    JSON.stringify(strangerView.body.games).indexOf('"loves":[') < 0);
-  const profile = strangerView.body.members.find((m) => m.login === 'friend-two');
-  ok('a profile does list what that person loves (public by design)',
-    profile.loved.indexOf('friend-one/plain-game') >= 0, JSON.stringify(profile.loved));
+  eq('a signed-out visitor sees no favourite mark', g2.favorite, false);
+  eq('and has no me at all', strangerView.body.me, null);
 
-  const off = await call(env, '/api/games/love', {
+  for (const [name, view] of [['the maker', ownerView], ['the Hub owner', adminView],
+    ['a signed-out visitor', strangerView]]) {
+    const text = JSON.stringify(view.body);
+    ok(name + ' is told no count and no list', text.indexOf('"loves"') < 0 &&
+      text.indexOf('"lovedByMe"') < 0 && text.indexOf('"loved"') < 0 &&
+      text.indexOf('friend-two/favorites') < 0);
+    ok(name + ' sees nothing about anyone else’s favourites',
+      (view.body.members || []).every((m) => m.favorites === undefined && m.loved === undefined));
+  }
+  ok('no member record in the payload carries a favourites field at all',
+    JSON.stringify(seen.body.members).indexOf('favorite') < 0);
+
+  const offRes = await call(env, '/api/games/favorite', {
     body: { id: 'friend-one/plain-game', on: false }, cookie: other
   });
-  eq('loving can be taken back', off.body.loves, 0);
+  eq('a favourite can be taken back', offRes.body.favorite, false);
+  eq('and the list is empty again', (await memberOf(store, 7002)).favorites.length, 0);
 
-  /* a love survives the game going to draft and back */
-  await call(env, '/api/games/love', { body: { id: 'friend-one/plain-game', on: true }, cookie: other });
+  /* a favourite survives the game going to draft and back */
+  await call(env, '/api/games/favorite', { body: { id: 'friend-one/plain-game', on: true }, cookie: other });
   await call(env, '/api/games/unpublish', { body: { repo: 'plain-game' }, cookie: mine });
   await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
-  eq('the love survived unpublish and publish',
-    (await gameOf(store, 7001, 'plain-game')).loves.length, 1);
+  eq('the favourite survived unpublish and publish',
+    (await memberOf(store, 7002)).favorites.length, 1);
 
-  /* the house game keeps its loves on its own record */
-  const houseLove = await call(env, '/api/games/love', {
+  /* the house game can be a favourite too */
+  const houseFav = await call(env, '/api/games/favorite', {
     body: { id: 'house/rare-pull', on: true }, cookie: admin
   });
-  eq('the house game can be loved too', houseLove.body.loves, 1);
-  const hub2 = await call(env, '/api/hub');
-  eq('and it shows', hub2.body.games.find((x) => x.id === 'house/rare-pull').loves, 1);
+  eq('the house game can be favourited', houseFav.body.favorite, true);
+  const hub2 = await call(env, '/api/hub', { cookie: admin });
+  eq('and it shows for them', hub2.body.games.find((x) => x.id === 'house/rare-pull').favorite, true);
+  eq('newest favourite first', (hub2.body.me.favorites || [])[0], 'house/rare-pull');
 
-  /* a member who leaves takes their loves with them, at the next refresh */
+  /* nothing that is not a game */
+  const junkFav = await call(env, '/api/games/favorite', { body: { id: 'nobody/nothing' }, cookie: other });
+  eq('favouriting something that is not here is refused', junkFav.res.status, 400);
+
+  /* a member who leaves takes their own list with them */
   await call(env, '/api/admin/member/ban', { body: { id: 7002 }, cookie: admin });
-  eq('the love is still there right after the ban',
-    (await gameOf(store, 7001, 'plain-game')).loves.length, 1);
-  await refresh(env, store, {});
-  eq('and gone after the refresh',
-    (await gameOf(store, 7001, 'plain-game')).loves.length, 0);
+  ok('their list went with the member record', (await memberOf(store, 7002)) === null);
+  const afterBan = await call(env, '/api/hub');
+  ok('and nothing anywhere remembers it',
+    JSON.stringify(afterBan.body).indexOf('"favorites"') < 0 ||
+    JSON.stringify(afterBan.body.games).indexOf('favorite":true') < 0);
 
-  /* the hourly allowance */
+  /* a favourite pointing at a game that is gone is tidied away by the refresh */
+  const stale = world();
+  const s1 = await joined('friend-one', stale.env, stale.store);
+  await call(stale.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: s1 });
+  await call(stale.env, '/api/games/meta', { body: { repo: 'plain-game', title: 'P' }, cookie: s1 });
+  await call(stale.env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: s1 });
+  await call(stale.env, '/api/games/favorite', {
+    body: { id: 'friend-one/plain-game', on: true }, cookie: s1
+  });
+  await call(stale.env, '/api/games/remove', { body: { repo: 'plain-game' }, cookie: s1 });
+  eq('the favourite is still there right after the game goes',
+    (await memberOf(stale.store, 7001)).favorites.length, 1);
+  await refresh(stale.env, stale.store, {});
+  eq('and the refresh clears it', (await memberOf(stale.store, 7001)).favorites.length, 0);
+
+  /* the cap */
+  const capped = world();
+  const c1 = await joined('friend-one', capped.env, capped.store);
+  await update(capped.store, (s) => {
+    const list = [];
+    for (let i = 0; i < 140; i++) list.push('someone/game-' + i);
+    s.members['7001'].favorites = list;
+  });
+  eq('a list is never longer than 100', (await call(capped.env, '/api/hub', { cookie: c1 }))
+    .body.me.favorites.length, 100);
+
+  /* the hourly allowance, as the loves had */
   const limited = world();
   const a = await joined('friend-one', limited.env, limited.store);
   const b = await joined('friend-two', limited.env, limited.store);
@@ -1267,12 +1322,12 @@ async function testLoves() {
   await call(limited.env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: a });
   let hit = 0;
   for (let i = 0; i < 62; i++) {
-    const r = await call(limited.env, '/api/games/love', {
+    const r = await call(limited.env, '/api/games/favorite', {
       body: { id: 'friend-one/plain-game', on: i % 2 === 0 }, cookie: b
     });
     if (r.res.status === 429) { hit = i + 1; break; }
   }
-  eq('love number 61 in an hour is refused', hit, 61);
+  eq('star number 61 in an hour is refused', hit, 61);
 
   /* reports */
   const rep = await call(env, '/api/games/report', { body: { id: 'friend-one/plain-game' }, cookie: mine });
@@ -1294,6 +1349,76 @@ async function testLoves() {
   const junk = await call(env, '/api/games/report', { body: { id: 'nobody/nothing' }, cookie: other });
   ok('reporting something that does not exist is refused',
     junk.res.status === 404 || junk.res.status === 403, 'status ' + junk.res.status);
+}
+
+/* ---------- 14b. the one-time move from loves to favourites ---------- */
+
+async function testLoveMigration() {
+  console.log('loves become favourites');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  const admin = await joined('sp101-admin', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/games/meta', { body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine });
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+
+  /* an old document: loves counted on the games, nobody has a favourites list */
+  await update(store, (s) => {
+    s.games['7001/plain-game'].loves = [7002, 9001, 123456];
+    s.house['rare-pull'] = { loves: [7002] };
+    delete s.members['7002'].favorites;
+  });
+  ok('the old shape is really there',
+    Array.isArray((await gameOf(store, 7001, 'plain-game')).loves));
+
+  /* the next write of the document moves it */
+  const after = await call(env, '/api/hub', { cookie: other });
+  const moved = await memberOf(store, 7002);
+  eq('a member who loved two games now has two favourites', moved.favorites.length, 2);
+  ok('the game they loved is on their list',
+    moved.favorites.indexOf('friend-one/plain-game') >= 0, moved.favorites.join());
+  ok('and so is the house game', moved.favorites.indexOf('house/rare-pull') >= 0);
+  eq('the owner got theirs too', (await memberOf(store, 9001)).favorites.join(),
+    'friend-one/plain-game');
+  ok('a love from somebody who is not a member any more is simply dropped',
+    JSON.stringify(await getState(store)).indexOf('123456') < 0);
+
+  eq('the loves field is gone from the game',
+    (await gameOf(store, 7001, 'plain-game')).loves, undefined);
+  eq('and from the house game', (await getState(store)).house['rare-pull'].loves, undefined);
+  ok('nothing counted is left in the payload', after.text.indexOf('"loves"') < 0);
+  eq('the member sees their moved favourite', after.body.games
+    .find((g) => g.id === 'friend-one/plain-game').favorite, true);
+  const adminSees = await call(env, '/api/hub', { cookie: admin });
+  eq('and so does the owner, for their own', adminSees.body.games
+    .find((g) => g.id === 'friend-one/plain-game').favorite, true);
+
+  /* running again changes nothing */
+  const favsOf = async () => JSON.stringify(listOf((await getState(store)).members)
+    .map((m) => m.id + ':' + (m.favorites || []).join('+')).sort());
+  const before = await favsOf();
+  await call(env, '/api/hub', { cookie: other });
+  await call(env, '/api/me/presence', { body: { show: true }, cookie: other });
+  eq('the move happens once, not every write', await favsOf(), before);
+
+  /* and the refresh does it as well, on a store with no write-time sweep */
+  const byRefresh = world();
+  await joined('friend-one', byRefresh.env, byRefresh.store);
+  const f2 = await joined('friend-two', byRefresh.env, byRefresh.store);
+  await call(byRefresh.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: f2 });
+  await update(byRefresh.store, (s) => {
+    s.games['7001/snake-dash'] = {
+      id: 'friend-one/snake-dash', ownerId: 7001, owner: 'friend-one', repo: 'snake-dash',
+      title: 'Snake Dash', description: '', category: 'arcade', status: 'published',
+      url: 'https://friend-one.github.io/snake-dash/', loves: [7002]
+    };
+  });
+  delete byRefresh.store.sweep;
+  const sum = await refresh(byRefresh.env, byRefresh.store, {});
+  ok('the refresh reports the move', sum.moved >= 1, JSON.stringify(sum));
+  ok('and the favourite is on the member',
+    (await memberOf(byRefresh.store, 7002)).favorites.indexOf('friend-one/snake-dash') >= 0);
 }
 
 async function testLongFields() {
@@ -1508,7 +1633,7 @@ async function testOneDocument() {
   await call(watchedEnv, '/api/hub');
   await call(watchedEnv, '/api/hub', { cookie: mine });
   await call(watchedEnv, '/api/me', { cookie: mine });
-  await call(watchedEnv, '/api/games/love', { body: { id: 'friend-one/plain-game', on: true }, cookie: mine });
+  await call(watchedEnv, '/api/games/favorite', { body: { id: 'friend-one/plain-game', on: true }, cookie: mine });
   await call(watchedEnv, '/api/presence/beat', { body: { game: 'friend-one/plain-game' }, cookie: mine });
   const admin = await joined('sp101-admin', watchedEnv, watched);
   await call(watchedEnv, '/api/admin/state', { cookie: admin });
@@ -1629,7 +1754,7 @@ async function testHeaders() {
 
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHubRepo, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
-  testDrafts, testCovers, testLoves, testLongFields, testPresenceCore,
+  testDrafts, testCovers, testFavorites, testLoveMigration, testLongFields, testPresenceCore,
   testPresenceRoutes, testOneDocument, testHeaders];
 
 (async () => {

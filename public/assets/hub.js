@@ -49,7 +49,6 @@ var Hub = (function () {
   var PATHS = {
     search: ['M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5 21 21', 0],
     person: ['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 1.8c-4.1 0-7 2-7 4.4V21h14v-2.8c0-2.4-2.9-4.4-7-4.4z', 1],
-    heart: ['M12 20.6 4.7 13.3a4.7 4.7 0 0 1 6.6-6.7l.7.7.7-.7a4.7 4.7 0 1 1 6.6 6.7z', 1],
     flag: ['M6 21V4m0 1h11l-2 3.5L17 12H6', 0],
     link: ['M10 14a3.6 3.6 0 0 1 0-5l2-2a3.6 3.6 0 1 1 5 5l-1 1M14 10a3.6 3.6 0 0 1 0 5l-2 2a3.6 3.6 0 1 1-5-5l1-1', 0],
     left: ['M14.5 5.5 8 12l6.5 6.5', 0],
@@ -58,7 +57,10 @@ var Hub = (function () {
     close: ['M6 6l12 12M18 6 6 18', 0],
     menu: ['M4 7h16M4 12h16M4 17h16', 0],
     play: ['M8 5.2v13.6L19 12z', 1],
-    check: ['M5 13l4 4L19 7', 0]
+    check: ['M5 13l4 4L19 7', 0],
+    /* the favourite star: the same shape drawn solid or as an outline */
+    star: ['M12 3.4l2.72 5.52 6.09.89-4.4 4.29 1.03 6.06L12 17.33l-5.44 2.83 1.03-6.06-4.4-4.29 6.09-.89z', 1],
+    starLine: ['M12 3.4l2.72 5.52 6.09.89-4.4 4.29 1.03 6.06L12 17.33l-5.44 2.83 1.03-6.06-4.4-4.29 6.09-.89z', 0]
   };
 
   function icon(name, size) {
@@ -449,9 +451,60 @@ var Hub = (function () {
     return null;
   }
 
+  /* ---------- favourites ----------
+   *
+   * Private and uncounted: a star that only says whether this game is on YOUR list.
+   * Nothing on the page ever shows how many people starred anything, because nothing
+   * anywhere knows.
+   */
+
+  function starIcon(on, size) {
+    return icon(on ? 'star' : 'starLine', size || 15);
+  }
+
+  /*
+   * The small star in the corner of a thumbnail. ctx: { me, onChange }.
+   * Returns null when nobody is signed in, or for a draft - there is nothing to star.
+   */
+  function cornerStar(game, ctx) {
+    var me = ctx && ctx.me;
+    if (!me || game.status === 'draft') return null;
+    var btn = el('button', 'fav' + (game.favorite ? ' on' : ''));
+    btn.type = 'button';
+    paint(btn, game.favorite);
+    btn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggle(game, btn, ctx);
+    });
+    return btn;
+  }
+
+  function paint(btn, on) {
+    clear(btn);
+    btn.appendChild(starIcon(on, 15));
+    btn.classList.toggle('on', Boolean(on));
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'In your favourites' : 'Add to your favourites';
+    btn.setAttribute('aria-label', (on ? 'Remove from favourites: ' : 'Add to favourites: ') +
+      (btn._title || ''));
+  }
+
+  function toggle(game, btn, ctx) {
+    var want = !game.favorite;
+    btn.disabled = true;
+    return post('/api/games/favorite', { id: game.id, on: want }).then(function (r) {
+      btn.disabled = false;
+      if (!r || !r.ok) return;
+      game.favorite = Boolean(r.favorite);
+      paint(btn, game.favorite);
+      if (ctx && ctx.onChange) ctx.onChange(game);
+    });
+  }
+
   /* ---------- a game thumbnail ---------- */
 
-  function thumb(game, members) {
+  function thumb(game, members, ctx) {
     var wrap = el('div', 'thumb');
     var shot = el('a', 'shot');
     shot.href = '/play.html?g=' + encodeURIComponent(game.id);
@@ -460,6 +513,12 @@ var Hub = (function () {
     if (game.status === 'draft') shot.appendChild(el('span', 'flag', 'Draft'));
     else if (game.featured) shot.appendChild(el('span', 'flag', 'Pick'));
     wrap.appendChild(shot);
+    var star = cornerStar(game, ctx);
+    if (star) {
+      star._title = game.title || 'Untitled';
+      paint(star, game.favorite);
+      wrap.appendChild(star);
+    }
 
     var t = el('a', 't', game.title || 'Untitled');
     t.href = '/play.html?g=' + encodeURIComponent(game.id);
@@ -471,15 +530,13 @@ var Hub = (function () {
     by.appendChild(who);
     wrap.appendChild(by);
 
-    var stats = el('div', 'loves');
+    /* the only number on a card: how many people are in there right now */
     if (game.active > 0) {
+      var stats = el('div', 'pl');
       stats.appendChild(icon('person', 12));
       stats.appendChild(el('span', '', game.active + ' playing'));
-      stats.appendChild(el('span', 'dotsep', '·'));
+      wrap.appendChild(stats);
     }
-    stats.appendChild(icon('heart', 12));
-    stats.appendChild(el('span', '', String(game.loves || 0)));
-    wrap.appendChild(stats);
     return wrap;
   }
 
@@ -585,6 +642,7 @@ var Hub = (function () {
     el: el, clear: clear, show: show, icon: icon, logoMark: logoMark,
     data: data, post: post, bar: bar, footer: footer, box: box, rail: rail,
     thumb: thumb, personCard: personCard, presenceText: presenceText, sortPeople: sortPeople,
+    starIcon: starIcon, favoriteToggle: toggle, paintStar: paint,
     coverInto: coverInto, coverUrl: coverUrl, playUrl: playUrl, avatarUrl: avatarUrl,
     profileUrl: profileUrl, memberOf: memberOf, ago: ago, niceDate: niceDate,
     monthYear: monthYear, count: count, hashOf: hashOf, beat: beat, fail: fail,

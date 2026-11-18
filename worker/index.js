@@ -19,8 +19,8 @@ import { makeGitHub, makeBudget } from './github.js';
 import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
   gamesOfMember, MAX_GAMES_PER_MEMBER, topicOf, setGameMeta, setGameStatus, maySee,
-  coverAllowance, putCover, houseGamesWithEdits, addLog, allowance, setLove, reportGame,
-  LOVES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames, isHubRepo, storeSweeper
+  coverAllowance, putCover, houseGamesWithEdits, addLog, allowance, setFavorite, reportGame,
+  FAVORITES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames, isHubRepo, storeSweeper
 } from './hub.js';
 import { readSession, handleLogin, handleCallback, handleLogout } from './auth.js';
 import { isAdmin, adminState, handleAdmin } from './admin.js';
@@ -398,15 +398,17 @@ async function handle(request, env, ctx) {
       return res.ok ? json({ ok: true, game: res.game }) : errorJson(400, res.error);
     }
 
-    /* loving a game: one small write, members only, published games only */
-    if (path === '/api/games/love') {
-      const allow = await allowance(env, store, 'love:' + member.id, LOVES_PER_HOUR, 3600000);
-      if (!allow.ok) return errorJson(429, 'that is a lot of loving for one hour');
-      const res = await setLove(env, store, body.id, member.id, body.on !== false);
+    /*
+     * Favouriting a game: one small write, members only, published games only. The
+     * answer says whether it is on the asker's own list and nothing else - there is no
+     * count to give away, here or anywhere.
+     */
+    if (path === '/api/games/favorite') {
+      const allow = await allowance(env, store, 'fav:' + member.id, FAVORITES_PER_HOUR, 3600000);
+      if (!allow.ok) return errorJson(429, 'that is a lot of starring for one hour');
+      const res = await setFavorite(env, store, body.id, member.id, body.on !== false);
       hubCache = { at: 0, body: null };
-      return res.ok
-        ? json({ ok: true, loves: res.loves, lovedByMe: res.lovedByMe })
-        : errorJson(400, res.error);
+      return res.ok ? json({ ok: true, favorite: res.favorite }) : errorJson(400, res.error);
     }
 
     /* "show when I'm online" lives on the member record */
