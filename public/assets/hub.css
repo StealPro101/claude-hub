@@ -20,6 +20,7 @@
   --accent-dark: #9a330a;
   --accent-soft: #fdf1ea;
   --accent-line: #f0d6c6;
+  --field: #fff;
   --gut: 28px;
   --read: 1100px;
   --radius: 10px;
@@ -80,85 +81,110 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 }
 
 .bar-in {
-  height: 50px;
+  height: 60px;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
 }
 
 .bar a { color: var(--white); text-decoration: none; }
-.bar a:hover { text-decoration: none; opacity: .85; }
+.bar a:hover { text-decoration: none; }
 
 .brand {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: .01em;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
-.bar-links { display: flex; gap: 16px; align-items: center; }
-.bar-links a { font-size: 13.5px; padding: 4px 2px; border-bottom: 2px solid transparent; }
-.bar-links a.on { border-bottom-color: rgba(255, 255, 255, .85); }
+/* every button up here is a smooth pill, big enough to hit without looking */
+.bar-links { display: flex; gap: 6px; align-items: center; }
+.bar-links a {
+  display: inline-flex; align-items: center; height: 40px; padding: 0 16px;
+  border-radius: 20px; font-size: 15.5px; font-weight: 600; white-space: nowrap;
+  transition: background .15s ease;
+}
+.bar-links a:hover { background: rgba(255, 255, 255, .16); }
+.bar-links a.on { background: rgba(255, 255, 255, .24); }
 
 .bar-search { margin-left: auto; display: flex; align-items: center; position: relative; }
-.bar-search input {
-  width: 190px;
-  height: 30px;
+.bar-search input[type=search] {
+  width: 260px;
+  height: 38px;
   border: 0;
-  border-radius: 15px;
-  padding: 0 30px 0 12px;
+  border-radius: 19px;
+  padding: 0 38px 0 16px;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--head);
-  background: var(--white);
+  background: var(--field);
 }
-.bar-search input::placeholder { color: #9aa0b0; }
+.bar-search input::placeholder { color: var(--soft); }
 .bar-search button {
-  position: absolute; right: 2px; top: 2px;
-  width: 26px; height: 26px; border: 0; background: none; cursor: pointer;
+  position: absolute; right: 4px; top: 4px;
+  width: 30px; height: 30px; border: 0; background: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center; color: var(--soft);
   border-radius: 50%;
 }
 .bar-search button:hover { color: var(--accent); }
 
-.bar-right { display: flex; align-items: center; gap: 12px; }
-.bar-right .join {
-  border: 1px solid rgba(255, 255, 255, .8);
-  border-radius: 4px;
-  padding: 6px 13px;
-  font-size: 13px;
+/* the search gives room back as the window narrows, before anything else has to */
+@media (max-width: 1180px) { .bar-search input[type=search] { width: 210px; } }
+@media (max-width: 1000px) { .bar-search input[type=search] { width: 170px; } }
+@media (max-width: 900px) { .bar-search input[type=search] { width: 140px; } }
+
+.bar-right { display: flex; align-items: center; gap: 10px; }
+
+/* the way into Settings, for everyone */
+.bar-gear {
+  width: 40px; height: 40px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s ease;
 }
-.bar-right .join:hover { background: rgba(255, 255, 255, .14); }
+.bar-gear:hover { background: rgba(255, 255, 255, .16); }
+.bar-gear.on { background: rgba(255, 255, 255, .24); }
+
+.bar-right .join {
+  display: inline-flex; align-items: center; height: 38px; padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, .8); border-radius: 19px;
+  font-size: 14.5px; font-weight: 600; transition: background .15s ease;
+}
+.bar-right .join:hover { background: rgba(255, 255, 255, .16); }
 .bar-right .btn {
-  background: var(--white); color: var(--accent); border-color: var(--white);
-  padding: 6px 15px;
+  background: #fff; color: var(--accent); border-color: #fff;
+  height: 38px; padding: 0 18px; border-radius: 19px; font-size: 14.5px;
+  transition: background .15s ease;
 }
 .bar-right .btn:hover { background: #fff3ec; color: var(--accent-dark); border-color: #fff3ec; }
 
 /* your own name, and the menu that hangs off it - not off the edge of the page */
 .who { position: relative; }
 .who-btn {
-  display: flex; align-items: center; gap: 8px; max-width: 190px;
-  background: none; border: 0; color: var(--white); cursor: pointer;
-  font: inherit; font-size: 13.5px; padding: 4px 6px; border-radius: 4px;
+  display: flex; align-items: center; gap: 9px; max-width: 220px; height: 40px;
+  background: none; border: 0; color: #fff; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 600; padding: 0 12px 0 5px;
+  border-radius: 20px; transition: background .15s ease;
 }
-.who-btn:hover, .who-btn[aria-expanded=true] { background: rgba(255, 255, 255, .16); }
-.who-btn img { width: 26px; height: 26px; border-radius: 4px; background: rgba(255,255,255,.3); }
+.who-btn:hover { background: rgba(255, 255, 255, .16); }
+.who-btn[aria-expanded=true] { background: rgba(255, 255, 255, .24); }
+.who-btn img { width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.3); }
 .who-btn .who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .who-btn .caret { width: 0; height: 0; flex: none; border-left: 4px solid transparent;
   border-right: 4px solid transparent; border-top: 4px solid currentColor; }
 .who-btn[aria-expanded=true] .caret { transform: rotate(180deg); }
 
 .menu {
-  position: absolute; top: calc(100% + 7px); right: 0; min-width: 184px;
+  position: absolute; top: calc(100% + 8px); right: 0; min-width: 210px;
   max-width: calc(100vw - 20px);
-  background: var(--white); border: 1px solid var(--line); border-radius: 7px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); padding: 5px 0; z-index: 60;
+  background: var(--white); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); padding: 6px 0; z-index: 60;
 }
 .menu a, .menu button {
   display: flex; align-items: center; width: 100%; text-align: left; background: none;
-  border: 0; font: inherit; font-size: 13.5px; color: var(--text); padding: 9px 16px;
-  cursor: pointer; white-space: nowrap;
+  border: 0; font: inherit; font-size: 15px; color: var(--text); padding: 11px 18px;
+  cursor: pointer; white-space: nowrap; transition: background .15s ease;
 }
 .menu a:hover, .menu button:hover, .menu a:focus-visible, .menu button:focus-visible {
   background: var(--accent-soft); color: var(--accent); text-decoration: none;
@@ -166,7 +192,10 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 .menu a:focus-visible, .menu button:focus-visible { outline-offset: -2px; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
 
-.burger { display: none; background: none; border: 0; color: var(--white); cursor: pointer; padding: 6px; }
+.burger { display: none; background: none; border: 0; color: #fff; cursor: pointer;
+  width: 42px; height: 42px; border-radius: 50%; align-items: center;
+  justify-content: center; transition: background .15s ease; }
+.burger:hover { background: rgba(255, 255, 255, .16); }
 
 /* ---------- hero / welcome ---------- */
 
@@ -695,15 +724,15 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
   .lower-in { padding: 0 16px; }
   .burger { display: flex; }
   .bar-links {
-    display: none; position: absolute; top: 50px; left: 0; right: 0;
-    background: var(--accent); flex-direction: column; gap: 0; padding: 6px 0;
-    box-shadow: 0 3px 8px rgba(0, 0, 0, .2);
+    display: none; position: absolute; top: 60px; left: 0; right: 0;
+    background: var(--accent); flex-direction: column; align-items: stretch; gap: 0;
+    padding: 4px 0; box-shadow: 0 3px 8px rgba(0, 0, 0, .2);
   }
   .bar-links.open { display: flex; }
-  .bar-links a { padding: 9px 18px; border-bottom: 0; }
+  .bar-links a { height: 48px; padding: 0 20px; font-size: 16px; border-radius: 0; }
   .bar-search { margin-left: auto; }
-  .bar-search input { width: 130px; }
-  .bar-in { gap: 10px; }
+  .bar-search input[type=search] { width: 150px; }
+  .bar-in { gap: 8px; }
   .two-up { flex-wrap: wrap; }
   .two-up > * { flex: 1 1 100%; }
   .form-grid { grid-template-columns: 1fr; }
@@ -737,7 +766,6 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 
 @media (max-width: 460px) {
   .brand { font-size: 16px; }
-  .bar-search input { width: 104px; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px 12px; }
 }
 
@@ -781,15 +809,27 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
   .act-in .btn { padding: 9px 13px; font-size: 13px; }
   .act-in .btn--big { padding: 10px 15px; font-size: 14px; }
   .act-in .msg { flex: 1 1 100%; margin-left: 0; text-align: left; font-size: 12.5px; }
-  .bar-in { gap: 8px; }
-  .bar-right { gap: 8px; }
-  .bar-right .btn { padding: 6px 11px; }
-  .bar-right .join { border: 0; padding: 5px 2px; }
+  .bar-in { gap: 7px; }
+  .bar-right { gap: 6px; }
+  .bar-right .btn { padding: 0 13px; font-size: 14px; }
+  .bar-right .join { border: 0; padding: 0 4px; font-size: 14px; }
+  .bar-gear { width: 38px; height: 38px; }
+  .burger { width: 38px; height: 38px; }
   .box-head .sub { display: none; }
   .box-head h2 { font-size: 13.5px; }
 }
 
 @media (max-width: 460px) {
-  .bar-search input { width: 92px; font-size: 12.5px; padding-right: 26px; }
+  /* the search keeps its width on a phone; the name beside it gives way instead */
+  .bar-search { flex: none; }
+  .bar-search input[type=search] { width: 92px; font-size: 13px; padding: 0 28px 0 11px; }
+  .bar-search button { right: 3px; top: 5px; width: 28px; height: 28px; }
+  .who-btn { max-width: 120px; padding: 0 7px 0 4px; }
+  .bar-in { gap: 6px; }
+  .bar-right { gap: 5px; }
+  .bar-right .btn { padding: 0 11px; font-size: 13.5px; }
+  .bar-right .join { padding: 0 3px; font-size: 13.5px; }
+  .bar-gear { width: 34px; height: 34px; }
+  .burger { width: 36px; height: 36px; }
   .person { width: 96px; flex: 0 0 96px; }
 }

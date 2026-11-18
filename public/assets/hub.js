@@ -57,6 +57,12 @@ var Hub = (function () {
     exit: ['M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h9', 0],
     close: ['M6 6l12 12M18 6 6 18', 0],
     menu: ['M4 7h16M4 12h16M4 17h16', 0],
+    /* settings: an eight-toothed cog, solid, with the middle cut out of it */
+    gear: ['M22.7 9.3L22.7 14.7 19.5 14.9 18.9 16.1 21.4 17.7 17.7 21.4 15.3 19.3 13.9 19.8' +
+      ' 14.7 22.7L9.3 22.7 9.1 19.5 7.9 18.9 6.3 21.4 2.6 17.7 4.7 15.3 4.2 13.9 1.3 14.7' +
+      'L1.3 9.3 4.5 9.1 5.1 7.9 2.6 6.3 6.3 2.6 8.7 4.7 10.1 4.2 9.3 1.3L14.7 1.3 14.9 4.5' +
+      ' 16.1 5.1 17.7 2.6 21.4 6.3 19.3 8.7 19.8 10.1Z' +
+      'M15.6 12a3.6 3.6 0 1 0-7.2 0 3.6 3.6 0 1 0 7.2 0', 1],
     play: ['M8 5.2v13.6L19 12z', 1],
     check: ['M5 13l4 4L19 7', 0],
     /* the favourite star: the same shape drawn solid or as an outline */
@@ -303,6 +309,9 @@ var Hub = (function () {
     var mp = el('a', '', 'My profile');
     mp.href = '/players.html#' + encodeURIComponent(me.login);
     menu.appendChild(mp);
+    var st = el('a', '', 'Settings');
+    st.href = '/settings.html';
+    menu.appendChild(st);
     if (me.admin) {
       var ad = el('a', '', 'Admin');
       ad.href = '/admin.html';
@@ -421,18 +430,19 @@ var Hub = (function () {
     var home = el('a', 'brand');
     home.href = '/';
     home.setAttribute('aria-label', 'Home');
-    home.appendChild(logoMark(30));
+    home.appendChild(logoMark(34));
     inner.appendChild(home);
 
     var burger = el('button', 'burger');
     burger.type = 'button';
     burger.setAttribute('aria-label', 'Menu');
-    burger.appendChild(icon('menu', 22));
+    burger.appendChild(icon('menu', 24));
     inner.appendChild(burger);
 
     var links = el('nav', 'bar-links');
     links.setAttribute('aria-label', 'Main');
-    links.appendChild(barLink('/explore.html', 'Explore', active === 'explore'));
+    links.appendChild(barLink('/', 'Home', active === 'home'));
+    links.appendChild(barLink('/charts.html', 'Charts', active === 'charts'));
     links.appendChild(barLink('/players.html', 'Players', active === 'players'));
     links.appendChild(barLink('/rules.html', 'Rules', active === 'rules'));
     inner.appendChild(links);
@@ -459,8 +469,15 @@ var Hub = (function () {
     inner.appendChild(form);
 
     var right = el('div', 'bar-right');
+    /* settings is for everyone, signed in or not: the theme lives in there */
+    var gear = el('a', 'bar-gear' + (active === 'settings' ? ' on' : ''));
+    gear.href = '/settings.html';
+    gear.title = 'Settings';
+    gear.setAttribute('aria-label', 'Settings');
+    gear.appendChild(icon('gear', 21));
+    right.appendChild(gear);
     if (!me) {
-      var join = el('a', 'btn btn--sm', 'Join');
+      var join = el('a', 'btn', 'Join');
       join.href = '/join.html';
       right.appendChild(join);
       var sin = el('a', 'join', 'Sign in');
