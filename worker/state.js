@@ -91,11 +91,25 @@ export async function getState(store) {
 /*
  * Read, change, write. `fn` gets the freshest copy and may return a value for the
  * caller; set `skip` on the returned box to walk away without writing.
+ *
+ * A store may carry a `sweep` function (the Worker hangs one on it in index.js). It
+ * runs on the fresh document before every change, which is how records that must not
+ * exist at all - the Hub's own repo - are cleared out without a job of their own. When
+ * the sweep found something, the document is written even if the change itself asked
+ * not to be.
  */
 export async function update(store, fn) {
   const state = await getState(store);
+  let swept = false;
+  if (store && typeof store.sweep === 'function') {
+    swept = Boolean(await store.sweep(state, store));
+  }
   const out = await fn(state);
-  if (out && out.__noWrite) return out.result;
+  if (out && out.__noWrite) {
+    if (!swept) return out.result;
+    await store.put(STATE_KEY, state);
+    return out.result;
+  }
   await store.put(STATE_KEY, state);
   return out;
 }

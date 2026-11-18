@@ -20,7 +20,7 @@ import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
   gamesOfMember, MAX_GAMES_PER_MEMBER, topicOf, setGameMeta, setGameStatus, maySee,
   coverAllowance, putCover, houseGamesWithEdits, addLog, allowance, setLove, reportGame,
-  LOVES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames
+  LOVES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames, isHubRepo, storeSweeper
 } from './hub.js';
 import { readSession, handleLogin, handleCallback, handleLogout } from './auth.js';
 import { isAdmin, adminState, handleAdmin } from './admin.js';
@@ -104,10 +104,16 @@ async function readBody(request) {
   }
 }
 
+/*
+ * The store, with the sweep hung on it. state.js runs that sweep on the fresh document
+ * before every write, which is what keeps the Hub's own repo from ever being a game -
+ * whatever route is doing the writing.
+ */
 function storeOf(env) {
-  if (env.HUB_STORE) return env.HUB_STORE;
-  if (env.HUB) return kvStore(env.HUB);
-  throw new Error('no storage bound');
+  const store = env.HUB_STORE || (env.HUB ? kvStore(env.HUB) : null);
+  if (!store) throw new Error('no storage bound');
+  store.sweep = storeSweeper(env);
+  return store;
 }
 
 let hubCache = { at: 0, body: null };
@@ -190,14 +196,18 @@ async function handle(request, env, ctx) {
     const mine = await gamesOfMember(store, member.id);
     const onHub = new Set(mine.map((g) => g.repo.toLowerCase()));
     const topic = topicOf(env);
-    const list = repos.filter((r) => repoEligible(r, member.id)).map((r) => ({
-      repo: r.name,
-      description: typeof r.description === 'string' ? r.description.slice(0, 200) : '',
-      stars: Number(r.stargazers_count) || 0,
-      updated: r.pushed_at || null,
-      topic: hasTopic(r, topic),
-      onHub: onHub.has(r.name.toLowerCase())
-    }));
+    const list = repos
+      .filter((r) => repoEligible(r, member.id))
+      /* the Hub's own repo has Pages on, but it is the Hub, not a game */
+      .filter((r) => !isHubRepo(env, member.login, r.name, member.id))
+      .map((r) => ({
+        repo: r.name,
+        description: typeof r.description === 'string' ? r.description.slice(0, 200) : '',
+        stars: Number(r.stargazers_count) || 0,
+        updated: r.pushed_at || null,
+        topic: hasTopic(r, topic),
+        onHub: onHub.has(r.name.toLowerCase())
+      }));
     return json({
       ok: true, repos: list, limit: MAX_GAMES_PER_MEMBER, used: mine.length, topic: topic
     });

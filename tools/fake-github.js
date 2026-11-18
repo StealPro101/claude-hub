@@ -85,6 +85,12 @@ export const FAKE_REPOS = {
   'sp101-admin': [
     repo(FAKE_USERS['sp101-admin'], 'owner-game', {
       topics: TOPIC, description: 'the house game', pushed_at: '2026-11-16T09:00:00Z'
+    }),
+    /* the Hub itself: public, Pages on (that is how the house games are served) and
+       even carrying the topic - it must still never be addable as a game */
+    repo(FAKE_USERS['sp101-admin'], 'claude-hub', {
+      topics: TOPIC, description: 'the Hub we are all playing on',
+      pushed_at: '2026-11-17T09:00:00Z'
     })
   ],
   stranger: [],

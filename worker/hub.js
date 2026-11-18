@@ -20,6 +20,8 @@ export const DEFAULT_TOPIC = 'claude-hub-game';
 export const MAX_GAMES_PER_MEMBER = 20;
 export const DRAFT = 'draft';
 export const PUBLISHED = 'published';
+export const FAVORITES_PER_HOUR = 60;
+export const MAX_FAVORITES = 100;
 export const LOVES_PER_HOUR = 60;
 export const REPORTS_PER_DAY = 5;
 export const COVER_PER_HOUR = 12;
@@ -81,6 +83,78 @@ export function houseGames(env) {
 
 export function topicOf(env) {
   return clean(env && env.HUB_TOPIC, 50).toLowerCase() || DEFAULT_TOPIC;
+}
+
+/*
+ * The repo the Hub itself lives in. It has Pages on (that is how the house games are
+ * served), so left alone it turns up as something to add, and the owner ends up with
+ * the Hub as a draft of his own. It is not a game and never can be: /api/my/repos
+ * leaves it out, addGame refuses it, the topic never picks it up, and any record of it
+ * is swept out of the document the next time anything is written.
+ */
+export function isHubRepo(env, login, repo, ownerId) {
+  if (!isRepoName(repo)) return false;
+  if (String(repo).toLowerCase() !== houseRepo(env).toLowerCase()) return false;
+  const sameLogin = isLogin(login) &&
+    String(login).toLowerCase() === houseOwner(env).toLowerCase();
+  const sameId = ownerId != null && isId(ownerId) && isAdminId(env, ownerId);
+  return sameLogin || sameId;
+}
+
+/* The keys in state.games that are really the Hub's own repo. */
+export function hubRepoKeys(env, state) {
+  return Object.keys(state.games).filter((k) => {
+    const g = state.games[k];
+    return g && isHubRepo(env, g.owner, g.repo, g.ownerId);
+  });
+}
+
+/*
+ * Takes the Hub's own repo out of the document: the record, its cover bytes, and the
+ * place it took in anybody's favourites. Returns how many records went.
+ */
+export async function sweepHubRepo(env, store, state) {
+  const keys = hubRepoKeys(env, state);
+  if (!keys.length) return 0;
+  const gone = [];
+  for (const key of keys) {
+    gone.push(state.games[key].id);
+    delete state.games[key];
+  }
+  for (const id of Object.keys(state.members)) {
+    const rec = state.members[id];
+    const favs = favoritesOf(rec);
+    const kept = favs.filter((x) => !gone.some((g) => g.toLowerCase() === x.toLowerCase()));
+    if (kept.length !== favs.length) rec.favorites = kept;
+  }
+  logInto(state, {
+    what: 'hub repo dropped', who: 'hub', detail: gone.join(', ')
+  });
+  if (store) {
+    for (const key of keys) {
+      const slash = key.indexOf('/');
+      await store.delete(coverKey(key.slice(0, slash), key.slice(slash + 1)));
+    }
+  }
+  return keys.length;
+}
+
+/* What index.js hangs on the store, so every write sweeps first. */
+export function storeSweeper(env) {
+  return function (state, store) {
+    return sweepHubRepo(env, store, state);
+  };
+}
+
+/* The same sweep on its own, for the 15-minute refresh. */
+export async function purgeHubRepo(env, store) {
+  const found = hubRepoKeys(env, await getState(store));
+  if (!found.length) return 0;
+  await update(store, async (s) => {
+    await sweepHubRepo(env, store, s);
+    return found.length;
+  });
+  return found.length;
 }
 
 export function adminIds(env) {
@@ -282,6 +356,9 @@ export function maySee(env, game, session) {
 export async function addGame(env, store, opts) {
   const { member, repoName, gh, roundCategory, by } = opts;
   if (!isRepoName(repoName)) return { ok: false, error: 'that is not a repo name' };
+  if (isHubRepo(env, member.login, repoName, member.id)) {
+    return { ok: false, error: 'that is the Hub itself' };
+  }
 
   let repo;
   try {
@@ -294,6 +371,10 @@ export async function addGame(env, store, opts) {
       ok: false,
       error: 'that repo is not eligible: it must be yours, public, not a fork, not archived, with GitHub Pages on'
     };
+  }
+  /* GitHub answers repo names case-insensitively, so check what it really handed back */
+  if (isHubRepo(env, repo.owner && repo.owner.login, repo.name, repo.owner && repo.owner.id)) {
+    return { ok: false, error: 'that is the Hub itself' };
   }
 
   const state = await getState(store);
@@ -422,6 +503,46 @@ export async function allowance(env, store, key, limit, windowMs) {
 
 export async function coverAllowance(env, store, whoKey) {
   return allowance(env, store, 'cover:' + whoKey, COVER_PER_HOUR, 3600000);
+}
+
+/* ---------- favourites ----------
+ *
+ * A favourite is private and uncounted: it is a list of game ids on the member's own
+ * record, newest first. Nobody else ever learns what is on it, and nothing anywhere
+ * adds the lists up - five friends and five "likes" on the best game said the wrong
+ * thing about it, a pinned row of your own says the right one.
+ */
+
+export function favoritesOf(record) {
+  const list = Array.isArray(record && record.favorites) ? record.favorites : [];
+  const out = [];
+  for (const id of list) {
+    if (typeof id !== 'string' || !id || id.length > 150) continue;
+    if (out.some((x) => x.toLowerCase() === id.toLowerCase())) continue;
+    out.push(id);
+  }
+  return out.slice(0, MAX_FAVORITES);
+}
+
+/* Drops favourites pointing at a game that is not on the Hub any more. */
+export async function pruneFavorites(env, store) {
+  const houseIds = houseGames(env).map((g) => g.id.toLowerCase());
+  return update(store, (s) => {
+    const live = new Set(houseIds.concat(
+      listOf(s.games).map((g) => String(g.id).toLowerCase())
+    ));
+    let changed = 0;
+    for (const key of Object.keys(s.members)) {
+      const rec = s.members[key];
+      const favs = favoritesOf(rec);
+      const kept = favs.filter((id) => live.has(id.toLowerCase()));
+      if (kept.length !== favs.length) {
+        rec.favorites = kept;
+        changed++;
+      }
+    }
+    return changed ? changed : noWrite(0);
+  });
 }
 
 /* ---------- loves ---------- */
@@ -664,6 +785,8 @@ export async function refresh(env, store, opts) {
   }
 
   summary.loves = await pruneLoves(env, store, await listMembers(store));
+  summary.favorites = await pruneFavorites(env, store);
+  summary.hubRepo = await purgeHubRepo(env, store);
 
   await update(store, (s) => {
     const set = tidySettings(s.settings);
@@ -768,6 +891,7 @@ async function refreshMember(env, store, gh, budget, member, topic, roundCategor
     if (budget.left() < 2) break;
     if (have.size + fetched.length >= MAX_GAMES_PER_MEMBER) break;
     if (have.has(r.name.toLowerCase())) continue;
+    if (isHubRepo(env, user.login, r.name, user.id)) continue;
     if (!hasTopic(r, topic)) continue;
     if (state.tombs[keyFor(member.id, r.name)]) continue;
     const hub = await gh.getHubJson(user.login, r.name, r.default_branch || 'main');

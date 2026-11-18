@@ -22,7 +22,9 @@ import {
   isOkEmoji, allowedCategory, safeAvatar
 } from '../worker/validate.js';
 import { pack } from '../worker/util.js';
-import { refresh, getSettings, saveSettings, hubPayload, HOUSE_GAMES, houseGames } from '../worker/hub.js';
+import {
+  refresh, getSettings, saveSettings, hubPayload, HOUSE_GAMES, houseGames, isHubRepo
+} from '../worker/hub.js';
 import { makeBudget, makeGitHub } from '../worker/github.js';
 import { fakeState, fakeFetch, fakeEnv, FAKE_BASE, FAKE_USERS } from './fake-github.js';
 
@@ -376,6 +378,98 @@ async function testGames() {
   const rm = await call(env, '/api/games/remove', { body: { repo: 'plain-game' }, cookie: session });
   eq('removing my own game works', rm.res.status, 200);
   ok('tombstone kept', (await tombOf(store, 7001, 'plain-game')).by === 'member');
+}
+
+/* ---------- 5b. the Hub's own repo is never a game ---------- */
+
+async function testHubRepo() {
+  console.log('the Hub is not a game');
+  const { env, store } = world();
+  const admin = await joined('sp101-admin', env, store);
+
+  ok('isHubRepo spots it by the admin id', isHubRepo(env, 'sp101-admin', 'claude-hub', 9001));
+  ok('and ignores the case of the repo name', isHubRepo(env, 'sp101-admin', 'CLAUDE-HUB', 9001));
+  ok('another repo of the owner is still a game', !isHubRepo(env, 'sp101-admin', 'owner-game', 9001));
+  ok('and the same name on someone else’s account is not the Hub',
+    !isHubRepo(env, 'friend-one', 'claude-hub', 7001));
+
+  /* 1. it is never offered */
+  const repos = await call(env, '/api/my/repos', { cookie: admin });
+  ok('/api/my/repos never lists the Hub itself',
+    repos.body.repos.every((r) => r.repo !== 'claude-hub'),
+    repos.body.repos.map((r) => r.repo).join());
+  ok('but still lists the owner’s real game',
+    repos.body.repos.some((r) => r.repo === 'owner-game'));
+
+  /* 2. adding it by hand is refused */
+  const add = await call(env, '/api/games/add', { body: { repo: 'claude-hub' }, cookie: admin });
+  eq('adding the Hub itself is refused', add.res.status, 400);
+  eq('and says what it is', add.body.error, 'that is the Hub itself');
+  const shouty = await call(env, '/api/games/add', { body: { repo: 'CLAUDE-HUB' }, cookie: admin });
+  eq('in any capitals', shouty.body.error, 'that is the Hub itself');
+
+  /* the login rule, case-insensitively, with no admin id to help */
+  const byLogin = world({ HUB_OWNER_LOGIN: 'FRIEND-ONE', HUB_REPO: 'Plain-Game', ADMIN_GITHUB_IDS: '9001' });
+  const one = await joined('friend-one', byLogin.env, byLogin.store);
+  ok('the owner login is matched whatever the case',
+    isHubRepo(byLogin.env, 'friend-one', 'plain-game', 7001));
+  const mine = await call(byLogin.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: one });
+  eq('so that member cannot add it either', mine.body.error, 'that is the Hub itself');
+  const stillOk = await call(byLogin.env, '/api/games/add', { body: { repo: 'snake-dash' }, cookie: one });
+  eq('their other games are untouched', stillOk.res.status, 200);
+
+  /* 3. the topic does not bring it in */
+  await refresh(env, store, {});
+  await refresh(env, store, {});
+  ok('the topic refresh skips the Hub repo', (await gameOf(store, 9001, 'claude-hub')) === null);
+  ok('while it did pick up the owner’s real game', Boolean(await gameOf(store, 9001, 'owner-game')));
+
+  /* 4. a record that is already there goes, with its picture and its favourites */
+  const planted = world();
+  const pAdmin = await joined('sp101-admin', planted.env, planted.store);
+  const pFriend = await joined('friend-one', planted.env, planted.store);
+  await update(planted.store, (s) => {
+    s.games['9001/claude-hub'] = {
+      id: 'sp101-admin/claude-hub', ownerId: 9001, owner: 'sp101-admin', repo: 'claude-hub',
+      title: 'Claude Hub', description: 'the thing we are playing on', category: 'freestyle',
+      url: 'https://sp101-admin.github.io/claude-hub/', status: 'draft', loves: [],
+      cover: { v: 'abc', type: 'image/png' }
+    };
+    s.members['7001'].favorites = ['sp101-admin/claude-hub', 'house/rare-pull'];
+  });
+  await planted.store.putBytes('cover:9001/claude-hub', pngBytes(), 'image/png');
+  ok('the planted record is really there', Boolean(await gameOf(planted.store, 9001, 'claude-hub')));
+
+  /* any write at all sweeps it out */
+  const pres = await call(planted.env, '/api/me/presence', { body: { show: true }, cookie: pFriend });
+  eq('an unrelated write still answers normally', pres.res.status, 200);
+  ok('and the Hub’s own record is gone', (await gameOf(planted.store, 9001, 'claude-hub')) === null);
+  ok('its picture bytes are gone too',
+    (await planted.store.getBytes('cover:9001/claude-hub')) === null);
+  const favs = (await memberOf(planted.store, 7001)).favorites;
+  eq('it is out of everyone’s favourites', favs.join(), 'house/rare-pull');
+  const hub = await call(planted.env, '/api/hub', { cookie: pAdmin });
+  ok('and the owner has no such draft',
+    hub.body.games.every((g) => g.id !== 'sp101-admin/claude-hub'),
+    hub.body.games.map((g) => g.id).join());
+  const log = JSON.stringify((await getSettings(planted.store)).log);
+  ok('the sweep says so in the log', log.indexOf('hub repo dropped') > 0, log.slice(0, 160));
+
+  /* and so does the refresh, on its own */
+  const byRefresh = world();
+  await joined('sp101-admin', byRefresh.env, byRefresh.store);
+  await update(byRefresh.store, (s) => {
+    s.games['9001/claude-hub'] = {
+      id: 'sp101-admin/claude-hub', ownerId: 9001, owner: 'sp101-admin', repo: 'claude-hub',
+      title: 'Claude Hub', description: '', category: 'freestyle', status: 'published',
+      url: 'https://sp101-admin.github.io/claude-hub/'
+    };
+  });
+  /* with the write-time sweep taken off, the refresh is the one that gets it */
+  delete byRefresh.store.sweep;
+  const sum = await refresh(byRefresh.env, byRefresh.store, {});
+  eq('the refresh reports dropping it', sum.hubRepo, 1);
+  ok('and it is gone', (await gameOf(byRefresh.store, 9001, 'claude-hub')) === null);
 }
 
 /* ---------- 6. the refresh and tombstones ---------- */
@@ -1533,7 +1627,7 @@ async function testHeaders() {
 
 /* ---------- run ---------- */
 
-const groups = [testPure, testSessions, testOauth, testInvite, testGames, testRefresh,
+const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHubRepo, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
   testDrafts, testCovers, testLoves, testLongFields, testPresenceCore,
   testPresenceRoutes, testOneDocument, testHeaders];
