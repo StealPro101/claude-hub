@@ -238,6 +238,152 @@ var Hub = (function () {
     });
   }
 
+  /* ---------- the menu behind your own name ----------
+   *
+   * It hangs off the button itself, not off the edge of the page, so it is under your
+   * name wherever that is. It behaves like a menu: click to open, click again, Escape
+   * or anywhere else to close, arrow keys to walk it, and choosing something closes it.
+   */
+
+  function whoMenu(d, me) {
+    var wrap = el('div', 'who');
+    var member = memberOf(d.members, me.login);
+
+    var btn = el('button', 'who-btn');
+    btn.type = 'button';
+    btn.id = 'whoBtn';
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-controls', 'whoMenu');
+    var img = document.createElement('img');
+    img.src = avatarUrl(member && member.avatar, me.id);
+    img.alt = '';
+    btn.appendChild(img);
+    btn.appendChild(el('span', 'who-name', me.login));
+    btn.appendChild(el('span', 'caret'));
+    wrap.appendChild(btn);
+
+    var drafts = (d.games || []).filter(function (g) {
+      return g.status === 'draft' && g.owner === me.login;
+    });
+
+    var menu = el('div', 'menu off');
+    menu.id = 'whoMenu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-labelledby', 'whoBtn');
+
+    /* the badge is a way in: one draft goes straight to its editor */
+    var mg = el('a', '', 'My games');
+    mg.href = drafts.length === 1
+      ? '/mygames.html#edit=' + encodeURIComponent(draftRepo(drafts[0]))
+      : (drafts.length ? '/mygames.html#drafts' : '/mygames.html');
+    if (drafts.length) {
+      mg.appendChild(el('span', 'badge',
+        drafts.length + (drafts.length === 1 ? ' draft' : ' drafts')));
+    }
+    menu.appendChild(mg);
+    var mp = el('a', '', 'My profile');
+    mp.href = '/players.html#' + encodeURIComponent(me.login);
+    menu.appendChild(mp);
+    if (me.admin) {
+      var ad = el('a', '', 'Admin');
+      ad.href = '/admin.html';
+      menu.appendChild(ad);
+    }
+    menu.appendChild(el('hr'));
+    var out = el('button', '', 'Sign out');
+    out.type = 'button';
+    out.addEventListener('click', function () {
+      post('/auth/logout', {}).then(function () { location.href = '/'; });
+    });
+    menu.appendChild(out);
+    wrap.appendChild(menu);
+
+    var items = [];
+    for (var i = 0; i < menu.children.length; i++) {
+      var node = menu.children[i];
+      if (node.tagName === 'A' || node.tagName === 'BUTTON') {
+        node.setAttribute('role', 'menuitem');
+        node.tabIndex = -1;
+        items.push(node);
+      }
+    }
+
+    function isOpen() { return !menu.classList.contains('off'); }
+
+    function open(focusFirst) {
+      menu.classList.remove('off');
+      btn.setAttribute('aria-expanded', 'true');
+      if (focusFirst && items.length) items[0].focus();
+    }
+
+    function close(backToButton) {
+      if (!isOpen()) return;
+      menu.classList.add('off');
+      btn.setAttribute('aria-expanded', 'false');
+      if (backToButton) btn.focus();
+    }
+
+    function step(from, dir) {
+      if (!items.length) return;
+      var at = items.indexOf(from);
+      var next = at < 0 ? (dir > 0 ? 0 : items.length - 1) : (at + dir + items.length) % items.length;
+      items[next].focus();
+    }
+
+    btn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (isOpen()) close(false); else open(false);
+    });
+    btn.addEventListener('keydown', function (ev) {
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        open(false);
+        step(null, ev.key === 'ArrowDown' ? 1 : -1);
+      }
+    });
+
+    menu.addEventListener('click', function (ev) {
+      /* choosing something closes it; a click on the padding does not */
+      if (ev.target.closest && ev.target.closest('[role=menuitem]')) close(false);
+      ev.stopPropagation();
+    });
+    menu.addEventListener('keydown', function (ev) {
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        step(document.activeElement, 1);
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        step(document.activeElement, -1);
+      } else if (ev.key === 'Home') {
+        ev.preventDefault();
+        items[0].focus();
+      } else if (ev.key === 'End') {
+        ev.preventDefault();
+        items[items.length - 1].focus();
+      } else if (ev.key === 'Tab') {
+        close(false);
+      }
+    });
+
+    document.addEventListener('click', function () { close(false); });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && isOpen()) {
+        ev.preventDefault();
+        close(true);
+      }
+    });
+
+    return wrap;
+  }
+
+  function draftRepo(game) {
+    if (!game) return '';
+    if (game.repo) return game.repo;
+    var id = String(game.id || '');
+    return id.slice(id.indexOf('/') + 1);
+  }
+
   /* ---------- the top bar ---------- */
 
   function barLink(href, label, on) {
@@ -303,56 +449,7 @@ var Hub = (function () {
       sin.href = '/auth/login';
       right.appendChild(sin);
     } else {
-      var member = memberOf(d.members, me.login);
-      var btn = el('button', 'who-btn');
-      btn.type = 'button';
-      btn.setAttribute('aria-haspopup', 'true');
-      btn.setAttribute('aria-expanded', 'false');
-      var img = document.createElement('img');
-      img.src = avatarUrl(member && member.avatar, me.id);
-      img.alt = '';
-      btn.appendChild(img);
-      btn.appendChild(el('span', '', me.login));
-      btn.appendChild(el('span', 'caret'));
-      right.appendChild(btn);
-
-      var drafts = (d.games || []).filter(function (g) {
-        return g.status === 'draft' && g.owner === me.login;
-      }).length;
-
-      var menu = el('div', 'menu off');
-      var mg = el('a', '', 'My games');
-      mg.href = '/mygames.html';
-      if (drafts) {
-        mg.appendChild(el('span', 'badge', drafts + (drafts === 1 ? ' draft' : ' drafts')));
-      }
-      menu.appendChild(mg);
-      var mp = el('a', '', 'My profile');
-      mp.href = '/players.html#' + encodeURIComponent(me.login);
-      menu.appendChild(mp);
-      if (me.admin) {
-        var ad = el('a', '', 'Admin');
-        ad.href = '/admin.html';
-        menu.appendChild(ad);
-      }
-      menu.appendChild(el('hr'));
-      var out = el('button', '', 'Sign out');
-      out.type = 'button';
-      out.addEventListener('click', function () {
-        post('/auth/logout', {}).then(function () { location.href = '/'; });
-      });
-      menu.appendChild(out);
-      host.appendChild(menu);
-
-      btn.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        var open = menu.classList.toggle('off');
-        btn.setAttribute('aria-expanded', open ? 'false' : 'true');
-      });
-      document.addEventListener('click', function () {
-        menu.classList.add('off');
-        btn.setAttribute('aria-expanded', 'false');
-      });
+      right.appendChild(whoMenu(d, me));
     }
     inner.appendChild(right);
     host.appendChild(inner);

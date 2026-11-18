@@ -130,26 +130,35 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 }
 .bar-right .btn:hover { background: #fff3ec; color: var(--accent-dark); border-color: #fff3ec; }
 
+/* your own name, and the menu that hangs off it - not off the edge of the page */
+.who { position: relative; }
 .who-btn {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 8px; max-width: 190px;
   background: none; border: 0; color: var(--white); cursor: pointer;
   font: inherit; font-size: 13.5px; padding: 4px 6px; border-radius: 4px;
 }
-.who-btn:hover { background: rgba(255, 255, 255, .14); }
+.who-btn:hover, .who-btn[aria-expanded=true] { background: rgba(255, 255, 255, .16); }
 .who-btn img { width: 26px; height: 26px; border-radius: 4px; background: rgba(255,255,255,.3); }
-.who-btn .caret { width: 0; height: 0; border-left: 4px solid transparent;
+.who-btn .who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who-btn .caret { width: 0; height: 0; flex: none; border-left: 4px solid transparent;
   border-right: 4px solid transparent; border-top: 4px solid currentColor; }
+.who-btn[aria-expanded=true] .caret { transform: rotate(180deg); }
 
 .menu {
-  position: absolute; top: 46px; right: 16px; min-width: 170px;
-  background: var(--white); border: 1px solid var(--line); border-radius: 6px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, .14); padding: 5px 0; z-index: 50;
+  position: absolute; top: calc(100% + 7px); right: 0; min-width: 184px;
+  max-width: calc(100vw - 20px);
+  background: var(--white); border: 1px solid var(--line); border-radius: 7px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); padding: 5px 0; z-index: 60;
 }
 .menu a, .menu button {
-  display: block; width: 100%; text-align: left; background: none; border: 0;
-  font: inherit; font-size: 13.5px; color: var(--text); padding: 8px 16px; cursor: pointer;
+  display: flex; align-items: center; width: 100%; text-align: left; background: none;
+  border: 0; font: inherit; font-size: 13.5px; color: var(--text); padding: 9px 16px;
+  cursor: pointer; white-space: nowrap;
 }
-.menu a:hover, .menu button:hover { background: var(--accent-soft); color: var(--accent); text-decoration: none; }
+.menu a:hover, .menu button:hover, .menu a:focus-visible, .menu button:focus-visible {
+  background: var(--accent-soft); color: var(--accent); text-decoration: none;
+}
+.menu a:focus-visible, .menu button:focus-visible { outline-offset: -2px; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
 
 .burger { display: none; background: none; border: 0; color: var(--white); cursor: pointer; padding: 6px; }
@@ -578,6 +587,7 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
 .presence-line.playing .dot { background: #3aa76d; }
 .presence-line.online .dot { background: #3b82d6; }
 
+.menu .badge { margin-left: auto; }
 .badge { display: inline-block; margin-left: 8px; background: var(--accent);
   color: var(--white); border-radius: 9px; font-size: 10.5px; font-weight: 700;
   padding: 1px 7px; vertical-align: 1px; }
