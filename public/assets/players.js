@@ -1,4 +1,10 @@
-/* Everyone here, and players.html#<login> for one person. */
+/*
+ * Everyone here, and players.html#<login> for one person.
+ *
+ * A profile is one wide header card - picture, name, @login, what they are up to and
+ * two or three numbers - and then what they have made, stacked under it. Favourites
+ * are private, so that row only ever appears on your own profile.
+ */
 (function () {
   'use strict';
   var listView = document.getElementById('listView');
@@ -30,9 +36,9 @@
   function showList() {
     Hub.show(profileView, false);
     Hub.show(listView, true);
+    document.title = 'Players · Hub';
     var members = hub.members || [];
-    document.getElementById('count').textContent =
-      'Players (' + members.length + ')';
+    document.getElementById('count').textContent = 'Players (' + members.length + ')';
     Hub.clear(people);
     if (!members.length) {
       people.appendChild(Hub.el('p', 'muted', 'Nobody has joined yet.'));
@@ -44,28 +50,39 @@
     });
   }
 
+  function num(host, value, label) {
+    var cell = Hub.el('div', 'pro-num');
+    cell.appendChild(Hub.el('div', 'v', String(value)));
+    cell.appendChild(Hub.el('div', 'k', label));
+    host.appendChild(cell);
+  }
+
   function showProfile(login) {
     var m = Hub.memberOf(hub.members, login);
     if (!m) { showList(); return; }
     Hub.show(listView, false);
     Hub.show(profileView, true);
     document.title = (m.name || m.login) + ' · Hub';
+    var isMe = Boolean(hub.me && hub.me.login === m.login);
+    var ctx = { me: hub.me };
+    var list = gamesOf(m.login);
 
     document.getElementById('pAv').src = Hub.avatarUrl(m.avatar, m.id);
     document.getElementById('pName').textContent = m.name || m.login;
 
+    /* @login, straight to their GitHub */
     var meta = document.getElementById('pMeta');
     Hub.clear(meta);
-    var link = Hub.el('a', '', '@' + m.login);
     var url = Hub.profileUrl(m.login);
     if (url) {
+      var link = Hub.el('a', '', '@' + m.login);
       link.href = url;
       link.rel = 'noopener noreferrer';
       link.target = '_blank';
       meta.appendChild(link);
-      meta.appendChild(document.createTextNode(' · '));
+    } else {
+      meta.appendChild(Hub.el('span', '', '@' + m.login));
     }
-    meta.appendChild(document.createTextNode('joined ' + (Hub.monthYear(m.joined) || m.joined || '')));
 
     var pres = document.getElementById('pPresence');
     Hub.clear(pres);
@@ -83,27 +100,33 @@
 
     var acts = document.getElementById('pActs');
     Hub.clear(acts);
-    if (hub.me && hub.me.login === m.login) {
-      acts.appendChild(Hub.el('span', 'pill pill-live', 'this is you'));
-      var mine = Hub.el('a', 'btn btn--grey btn--sm', 'My games');
+    if (isMe) {
+      var mine = Hub.el('a', 'btn btn--grey btn--sm', 'Edit my games');
       mine.href = '/mygames.html';
       acts.appendChild(mine);
     }
 
-    document.getElementById('pBio').textContent = m.bio || 'Nothing here yet.';
-    var list = gamesOf(m.login);
-    var ctx = { me: hub.me };
-    document.getElementById('pStats').textContent =
-      Hub.count(list.length, 'game') + ' shared · ' +
-      Hub.count(list.reduce(function (n, g) { return n + (g.visits || 0); }, 0), 'visit');
+    var nums = document.getElementById('pNums');
+    Hub.clear(nums);
+    num(nums, list.length, list.length === 1 ? 'Game shared' : 'Games shared');
+    num(nums, list.reduce(function (n, g) { return n + (g.visits || 0); }, 0), 'Visits');
+    num(nums, Hub.monthYear(m.joined) || '—', 'Joined');
+
+    /* their GitHub bio, as plain text - no box around nothing */
+    var bio = document.getElementById('pBio');
+    bio.textContent = m.bio || '';
+    Hub.show(bio, Boolean(m.bio));
 
     var pg = document.getElementById('pGames');
     Hub.clear(pg);
-    document.getElementById('pEmpty').textContent = list.length ? '' : 'Nothing shared yet.';
+    document.getElementById('pEmpty').textContent = list.length
+      ? ''
+      : (isMe
+        ? 'You have not shared a game yet. Add one from My games and press Publish.'
+        : (m.name || m.login) + ' has not shared a game yet.');
     list.forEach(function (g) { pg.appendChild(Hub.thumb(g, hub.members, ctx)); });
 
-    /* favourites are private: only ever on your own profile */
-    var isMe = Boolean(hub.me && hub.me.login === m.login);
+    /* favourites are private: your own profile only, never anybody else's */
     var ids = isMe ? ((hub.me && hub.me.favorites) || []) : [];
     var favs = [];
     ids.forEach(function (id) {

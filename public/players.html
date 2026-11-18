@@ -16,30 +16,26 @@
       <div class="box-body"><div class="people-grid" id="people"></div></div>
     </section>
   </div>
+
+  <!-- one person: a wide header card, then what they have made -->
   <div id="profileView" class="off">
-    <div class="profile-head">
-      <img id="pAv" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
-      <div>
+    <div class="pro-head">
+      <img id="pAv" class="pro-av" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
+      <div class="pro-id">
         <h1 id="pName"></h1>
-        <div class="meta" id="pMeta"></div>
+        <div class="pro-at" id="pMeta"></div>
         <div id="pPresence"></div>
-        <div class="btn-row" id="pActs"></div>
       </div>
+      <div class="pro-acts" id="pActs"></div>
+      <div class="pro-nums" id="pNums"></div>
     </div>
-    <div class="two-up">
-      <section class="box" id="aboutBox">
-        <div class="box-head"><h2>About</h2></div>
-        <div class="box-body"><p id="pBio" class="pre"></p></div>
-      </section>
-      <section class="box">
-        <div class="box-head"><h2>On the Hub</h2></div>
-        <div class="box-body"><p id="pStats"></p></div>
-      </section>
-    </div>
+    <p class="pro-about pre off" id="pBio"></p>
+
     <section class="box">
-      <div class="box-head"><h2>Shared games</h2></div>
+      <div class="box-head"><h2>Games</h2></div>
       <div class="box-body"><div class="grid" id="pGames"></div><p class="muted" id="pEmpty"></p></div>
     </section>
+
     <section class="box off" id="favBox">
       <div class="box-head"><h2>Favorites</h2><span class="sub">only you see these</span></div>
       <div class="box-body"><div class="grid" id="pFavs"></div></div>

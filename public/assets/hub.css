@@ -452,12 +452,36 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .lower { background: var(--band); border-top: 1px solid var(--line); margin-top: 26px; }
 .lower-in { padding: 6px 16px 28px; }
 
-/* ---------- profile ---------- */
+/* ---------- profile ----------
+   Structure borrowed from a player profile: one wide card with a large round picture
+   at the left, the name big, the login under it, what they are up to, and a row of
+   numbers; then the sections stacked underneath. */
 
-.profile-head { display: flex; gap: 18px; align-items: flex-start; padding: 22px 0 6px; }
-.profile-head img { width: 72px; height: 72px; border-radius: 50%; background: var(--strip); }
-.profile-head h1 { font-size: 24px; font-weight: 600; }
-.profile-head .meta { font-size: 13px; color: var(--soft); margin-top: 2px; }
+.pro-head {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr) auto;
+  grid-template-areas: "av id acts" "nums nums nums";
+  gap: 16px 22px; align-items: center;
+  background: var(--white); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 22px 24px 0; margin-top: 22px;
+}
+.pro-av { grid-area: av; width: 110px; height: 110px; border-radius: 50%;
+  background: var(--strip); object-fit: cover; }
+.pro-id { grid-area: id; min-width: 0; }
+.pro-id h1 { font-size: 27px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15;
+  overflow-wrap: anywhere; }
+.pro-at { font-size: 13.5px; margin-top: 3px; }
+.pro-at a { color: var(--soft); }
+.pro-at a:hover { color: var(--accent); }
+.pro-id .presence-line { margin-top: 8px; }
+.pro-acts { grid-area: acts; align-self: start; }
+.pro-nums { grid-area: nums; display: flex; gap: 38px; margin-top: 18px;
+  border-top: 1px solid var(--line); padding: 14px 0 15px; }
+.pro-num .v { font-size: 19px; font-weight: 700; color: var(--head); line-height: 1.2; }
+.pro-num .k { font-size: 11.5px; color: var(--soft); text-transform: uppercase;
+  letter-spacing: .06em; margin-top: 2px; }
+.pro-about { margin: 18px 2px 2px; font-size: 15px; line-height: 1.55; max-width: 70ch;
+  color: var(--text); }
+
 .two-up { display: flex; gap: 20px; align-items: flex-start; }
 .two-up > * { flex: 1 1 0; min-width: 0; margin-top: 20px; }
 
@@ -646,6 +670,15 @@ footer { background: var(--band); border-top: 1px solid var(--line); margin-top:
   .two-up > * { flex: 1 1 100%; }
   .form-grid { grid-template-columns: 1fr; }
   .hero h1 { font-size: 22px; }
+
+  /* the profile card stacks: picture and name side by side, numbers under them */
+  .pro-head { grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-areas: "av id" "acts acts" "nums nums"; gap: 12px 16px; padding: 18px 16px 0; }
+  .pro-av { width: 76px; height: 76px; }
+  .pro-id h1 { font-size: 21px; }
+  .pro-acts { justify-self: start; }
+  .pro-nums { gap: 26px; margin-top: 14px; }
+  .pro-num .v { font-size: 17px; }
 
   /* the filters become tabs across the top */
   .mg { grid-template-columns: 1fr; gap: 14px; }
