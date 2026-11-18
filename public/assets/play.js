@@ -156,8 +156,9 @@
     paintStar();
     if (!me) {
       star.disabled = true;
-      starWord.textContent = 'Sign in to favorite';
-      star.title = 'Favorites are private to you';
+      starWord.textContent = 'Favorite';
+      star.title = 'Sign in to favorite a game';
+      star.setAttribute('aria-label', 'Favorite (sign in first)');
     } else if (game.status === 'draft') {
       star.disabled = true;
       star.title = 'Publish it first';
@@ -206,7 +207,6 @@
     });
     acts.appendChild(report);
     info.appendChild(acts);
-    if (!me) info.appendChild(Hub.el('div', 'small muted gp-hint', 'Sign in to favorite a game.'));
 
     /* ---- the numbers ---- */
     function drawCounts(g) {

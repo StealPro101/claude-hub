@@ -382,9 +382,13 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .gp-now { margin-top: 10px; font-size: 13px; color: var(--text);
   display: flex; align-items: center; gap: 7px; }
 .dot-live { width: 8px; height: 8px; border-radius: 50%; background: #1a9a52; flex: none; }
-.gp-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px;
+.gp-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px;
   padding-top: 12px; border-top: 1px solid var(--line); }
 .gp-acts .fav-btn { margin-right: auto; }
+.gp-acts > * { flex: none; white-space: nowrap; }
+.gp-acts .btn--sm { padding: 6px 8px; font-size: 12.5px; }
+.gp-acts .fav-btn { padding: 6px 10px; font-size: 12.5px; gap: 6px; }
+@media (min-width: 821px) { .gp-acts { flex-wrap: nowrap; } }
 .gp-hint { margin-top: 8px; }
 
 .gp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0;
