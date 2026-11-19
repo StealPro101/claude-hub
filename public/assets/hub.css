@@ -21,6 +21,8 @@
   --accent-soft: #fdf1ea;
   --accent-line: #f0d6c6;
   --field: #fff;
+  /* how wide one game is drawn; a row or a grid overrides it with its size class */
+  --tile: 216px;
   --gut: 28px;
   --read: 1100px;
   --radius: 10px;
@@ -273,9 +275,11 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 }
 .rail-track::-webkit-scrollbar { display: none; }
 
-/* the round ends of a row, level with the middle of the pictures */
+/* the round ends of a row, level with the middle of the picture, whatever size it is
+   (a 16:10 picture var(--tile) wide has its middle at .3125 x --tile) */
 .rail-btn {
-  position: absolute; top: 40px; width: 30px; height: 30px; border-radius: 50%;
+  position: absolute; top: calc(var(--tile) * .3125 - 13px);
+  width: 30px; height: 30px; border-radius: 50%;
   border: 1px solid var(--line); background: var(--white); color: var(--text);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, .14); z-index: 5;
@@ -285,17 +289,24 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 .rail-btn.next { right: -14px; }
 .rail-btn[hidden] { display: none; }
 
-/* ---------- thumbnails ---------- */
+/* ---------- thumbnails ----------
+   One number decides how big a game is drawn: --tile, set by the size class on the row
+   or the grid around it. Three games in a row are big enough to hit without aiming;
+   twenty are small enough to read as a shelf. */
 
-.thumb { width: 176px; flex: 0 0 176px; }
+.size-xl { --tile: 340px; }
+.size-lg { --tile: 270px; }
+.size-md { --tile: 216px; }
+
+.thumb { width: var(--tile); flex: 0 0 var(--tile); position: relative; }
 .thumb .shot {
   display: block;
-  width: 176px; height: 110px; border: 1px solid var(--line); border-radius: 8px;
+  width: 100%; aspect-ratio: 16 / 10; border: 1px solid var(--line); border-radius: 10px;
   overflow: hidden; background: var(--strip); position: relative;
 }
 .thumb .shot img { width: 100%; height: 100%; object-fit: cover; }
 .thumb a.t {
-  display: block; margin-top: 7px; font-size: 15px; font-weight: 700; color: var(--head);
+  display: block; margin-top: 8px; font-size: 15px; font-weight: 700; color: var(--head);
   line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .thumb a.t:hover { text-decoration: underline; }
@@ -303,7 +314,22 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   text-overflow: ellipsis; white-space: nowrap; }
 .thumb .by a { color: var(--soft); }
 .thumb .by a:hover { color: var(--accent); }
-.thumb { position: relative; }
+
+/* the words follow the picture up and down */
+.size-xl .thumb a.t { font-size: 18px; }
+.size-lg .thumb a.t { font-size: 16.5px; }
+.size-md .thumb a.t { font-size: 15px; }
+.size-xl .thumb .tstats, .size-xl .thumb .by { font-size: 13.5px; }
+.size-lg .thumb .tstats, .size-lg .thumb .by { font-size: 13px; }
+.size-md .thumb .tstats, .size-md .thumb .by { font-size: 12.5px; }
+.size-xl .thumb .tstats svg { width: 15px; height: 15px; }
+.size-lg .thumb .tstats svg { width: 14px; height: 14px; }
+.size-xl .thumb .fav { width: 32px; height: 32px; right: 7px; top: 7px; }
+.size-xl .thumb .fav svg { width: 17px; height: 17px; }
+.size-lg .thumb .fav { width: 30px; height: 30px; right: 6px; top: 6px; }
+.size-lg .thumb .fav svg { width: 16px; height: 16px; }
+.size-xl .thumb .flag { font-size: 12px; padding: 4px 9px; border-radius: 9px 0 5px 0; }
+.size-lg .thumb .flag { font-size: 11.5px; padding: 3px 8px; border-radius: 9px 0 5px 0; }
 
 /* under every published game: who is in there now, and how often it has been opened */
 .thumb .tstats { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 3px;
@@ -331,8 +357,8 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   .thumb .fav svg { width: 13px; height: 13px; }
 }
 .thumb .flag { position: absolute; left: 0; top: 0; background: var(--accent);
-  color: var(--white); font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
-  text-transform: uppercase; padding: 2px 6px; border-radius: 7px 0 4px 0; }
+  color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; padding: 2px 6px; border-radius: 9px 0 4px 0; }
 
 /* a cover with no picture: the title set on a flat colour */
 .gen { width: 100%; height: 100%; display: flex; align-items: flex-end; padding: 9%;
@@ -359,11 +385,20 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .person .s { font-size: 12px; color: var(--soft); }
 
+/* six people or fewer: bigger pictures, the same rule the games follow */
+.people-big .person { width: 150px; flex: 0 0 150px; }
+.people-big .person img { width: 104px; height: 104px; }
+.people-big .person .n { font-size: 15px; margin-top: 8px; }
+.people-big .person .s { font-size: 13px; }
+.rail.people-row .rail-btn { top: 21px; }
+.rail.people-row.people-big .rail-btn { top: 37px; }
+
 /* ---------- grids ---------- */
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 24px 18px; }
+/* auto-fill, never auto-fit: two games stay two games, they do not stretch out */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr));
+  gap: 24px 18px; }
 .grid .thumb, .grid .thumb .shot { width: 100%; flex: none; }
-.grid .thumb .shot { height: auto; aspect-ratio: 16 / 10; }
 
 /* ---------- explore ---------- */
 
@@ -762,11 +797,18 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
   /* a finger scrolls a row, so the round ends are not needed and not in the way */
   .rail-btn { display: none; }
   .box--row > .box-head h2 { font-size: 17px; }
+
+  /* the same three steps, sized for a hand */
+  .size-xl { --tile: min(78vw, 300px); }
+  .size-lg { --tile: 220px; }
+  .size-md { --tile: 168px; }
 }
 
 @media (max-width: 460px) {
   .brand { font-size: 16px; }
-  .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px 12px; }
+  /* a shelf of many games still shows two across on a phone */
+  .size-md { --tile: 150px; }
+  .grid { gap: 18px 12px; }
 }
 
 /* presence dots, badges and the extra bits the rows need */
@@ -790,6 +832,8 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: 18px 10px; }
+.people-grid.people-big { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 26px 12px; }
 .people-grid .person { width: auto; flex: none; }
 
 .toolbar .grow { flex: 1 1 220px; }

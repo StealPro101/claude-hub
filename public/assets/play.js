@@ -256,9 +256,10 @@
       var b1 = Hub.box('More from ' + game.owner, {
         moreHref: '/players.html#' + encodeURIComponent(game.owner), tight: true, row: true
       });
-      b1.body.appendChild(Hub.rail(byMaker.slice(0, 16).map(function (g) {
+      var m1 = byMaker.slice(0, 16);
+      b1.body.appendChild(Hub.rail(m1.map(function (g) {
         return Hub.thumb(g, members, { me: me });
-      })));
+      }), Hub.sizeFor(m1.length)));
       lowerIn.appendChild(b1.box);
     }
     if (sameCat.length) {
@@ -266,9 +267,10 @@
       var b2 = Hub.box('More ' + game.category + ' games', {
         moreHref: '/explore.html?cat=' + encodeURIComponent(game.category), tight: true, row: true
       });
-      b2.body.appendChild(Hub.rail(sameCat.slice(0, 16).map(function (g) {
+      var m2 = sameCat.slice(0, 16);
+      b2.body.appendChild(Hub.rail(m2.map(function (g) {
         return Hub.thumb(g, members, { me: me });
-      })));
+      }), Hub.sizeFor(m2.length)));
       lowerIn.appendChild(b2.box);
     }
     lower.classList.toggle('off', !any);

@@ -44,6 +44,7 @@
       return;
     }
     var games = published();
+    people.className = 'people-grid' + (members.length <= 6 ? ' people-big' : '');
     Hub.sortPeople(members).forEach(function (m) {
       people.appendChild(Hub.personCard(m, games));
     });
@@ -118,6 +119,7 @@
 
     var pg = document.getElementById('pGames');
     Hub.clear(pg);
+    pg.className = 'grid ' + Hub.sizeFor(list.length);
     document.getElementById('pEmpty').textContent = list.length
       ? ''
       : (isMe
@@ -134,6 +136,7 @@
     Hub.show('favBox', isMe && favs.length > 0);
     var pf = document.getElementById('pFavs');
     Hub.clear(pf);
+    pf.className = 'grid ' + Hub.sizeFor(favs.length);
     favs.forEach(function (g) { pf.appendChild(Hub.thumb(g, hub.members, ctx)); });
   }
 

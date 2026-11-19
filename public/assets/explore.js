@@ -77,6 +77,7 @@
     found.textContent = (state.q ? 'Searching for “' + state.q + '” · ' : '') +
       Hub.count(list.length, 'game');
     Hub.clear(grid);
+    grid.className = 'grid ' + Hub.sizeFor(list.length);
     empty.textContent = list.length ? '' : 'No games match that.';
     for (var i = 0; i < list.length; i++) {
       grid.appendChild(Hub.thumb(list[i], state.members, state.ctx));

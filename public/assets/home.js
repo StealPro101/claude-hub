@@ -53,7 +53,7 @@
       Hub.clear(favBox.body);
       favBox.body.appendChild(Hub.rail(list.map(function (g) {
         return Hub.thumb(g, members, ctx);
-      })));
+      }), Hub.sizeFor(list.length)));
     }
 
     /* who is about */
@@ -62,7 +62,7 @@
       var pb = Hub.box('Players (' + members.length + ')', {
         moreHref: '/players.html', tight: true, row: true
       });
-      pb.body.appendChild(Hub.rail(people));
+      pb.body.appendChild(Hub.rail(people, Hub.peopleSize(people.length)));
       main.appendChild(pb.box);
     }
 
@@ -111,9 +111,10 @@
       o.tight = true;
       o.row = true;
       var b = Hub.box(title, o);
-      b.body.appendChild(Hub.rail(list.slice(0, 24).map(function (g) {
+      var shown = list.slice(0, 24);
+      b.body.appendChild(Hub.rail(shown.map(function (g) {
         return Hub.thumb(g, members, ctx);
-      })));
+      }), Hub.sizeFor(shown.length)));
       main.appendChild(b.box);
     }
   }

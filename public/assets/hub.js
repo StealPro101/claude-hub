@@ -513,9 +513,26 @@ var Hub = (function () {
     return { box: wrap, body: body, head: head };
   }
 
+  /*
+   * How big the tiles in a row or a grid should be. A row holding two or three games
+   * has room to make them big and easy to hit; a row of twelve has not. One rule,
+   * used by every rail and every grid, so nothing on the site disagrees with itself.
+   */
+  function sizeFor(n) {
+    var count = Number(n) || 0;
+    if (count <= 3) return 'size-xl';
+    if (count <= 6) return 'size-lg';
+    return 'size-md';
+  }
+
+  /* the same idea for a row of people: a few of them get bigger pictures */
+  function peopleSize(n) {
+    return 'people-row' + ((Number(n) || 0) <= 6 ? ' people-big' : '');
+  }
+
   /* A single row that scrolls sideways, with a round button at each end. */
-  function rail(items) {
-    var wrap = el('div', 'rail');
+  function rail(items, cls) {
+    var wrap = el('div', 'rail' + (cls ? ' ' + cls : ''));
     var track = el('div', 'rail-track');
     for (var i = 0; i < items.length; i++) track.appendChild(items[i]);
     wrap.appendChild(track);
@@ -763,6 +780,7 @@ var Hub = (function () {
   return {
     el: el, clear: clear, show: show, icon: icon, logoMark: logoMark,
     data: data, post: post, bar: bar, box: box, rail: rail,
+    sizeFor: sizeFor, peopleSize: peopleSize,
     thumb: thumb, personCard: personCard, presenceText: presenceText, sortPeople: sortPeople,
     starIcon: starIcon, favoriteToggle: toggle, paintStar: paint,
     coverInto: coverInto, coverUrl: coverUrl, playUrl: playUrl, avatarUrl: avatarUrl,
