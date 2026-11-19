@@ -1611,10 +1611,44 @@ async function testPresenceCore() {
 
   /* rate counting without touching KV */
   let left = null;
-  for (let i = 0; i < 4; i++) left = core.rate('love:9', 3, 60000);
+  for (let i = 0; i < 4; i++) left = await core.rate('love:9', 3, 60000);
   eq('the fourth in the window is refused', left.ok, false);
+  /* the object going to sleep in the middle of a window must not hand out a fresh one */
+  const dozed = new PresenceCore(core.storage, () => now);
+  eq('a counter that is full stays full through a sleep',
+    (await dozed.rate('love:9', 3, 60000)).ok, false);
   now += 61000;
-  eq('and allowed again in the next window', core.rate('love:9', 3, 60000).ok, true);
+  eq('and allowed again in the next window', (await core.rate('love:9', 3, 60000)).ok, true);
+
+  /*
+   * Cloudflare puts the object to sleep after about ten quiet seconds and its memory
+   * goes with it, while beats are 45 seconds apart. Every call below meets a brand new
+   * object on the same storage, which is what a quiet evening really looks like.
+   */
+  const disk = fakeStorage();
+  const wake = () => new PresenceCore(disk, () => now);
+  await wake().beat('7001', null, 'friend-one/space-dodge');
+  await wake().beat(null, 'tok-sleepy', 'friend-one/space-dodge');
+  now += 30000;
+  let seen = await wake().snapshot();
+  eq('somebody in a game is still in it after the object slept',
+    seen.active['friend-one/space-dodge'], 2);
+  eq('and a member is still shown as there', seen.members['7001'].game, 'friend-one/space-dodge');
+  now += 15000;
+  await wake().beat('7001', null, 'friend-one/space-dodge');
+  await wake().beat(null, 'tok-sleepy', 'friend-one/space-dodge');
+  seen = await wake().snapshot('7001');
+  eq('45 seconds between two beats count, sleep or no sleep',
+    seen.myTime['friend-one/space-dodge'], 45000);
+  eq('for the guest too, in the total', seen.time['friend-one/space-dodge'], 90000);
+  await wake().visit('friend-one/space-dodge', '7001');
+  const twice = await wake().visit('friend-one/space-dodge', '7001');
+  eq('a visit already counted is not counted again by a woken object', twice.counted, false);
+  now += 91000;
+  seen = await wake().snapshot();
+  eq('and somebody who stopped beating is gone, not kept for ever',
+    seen.active['friend-one/space-dodge'] || 0, 0);
+  ok('with no row left behind', !seen.members['7001']);
 }
 
 /* ---------- 15b. how long a game has been played ---------- */
@@ -1739,8 +1773,8 @@ async function testPlayTime() {
   await woken.beat('7001', null, GAME);
   now += 10000;
   await woken.leave('7001', null);
-  eq('and it carries on from there, not from zero',
-    (await woken.snapshot('7001')).time[GAME], 60000);
+  eq('and it carries straight on through the sleep, the gap included',
+    (await woken.snapshot('7001')).time[GAME], 70000);
 
   /* a storage key is only written when that key changed */
   const quiet = new PresenceCore(fakeStorage(), () => now);
@@ -1756,7 +1790,19 @@ async function testPlayTime() {
   puts = [];
   now += 45000;
   await quiet.beat('7001', null, null);
-  eq('a minute with nobody playing costs no write at all', puts.length, 0);
+  eq('a member who is only looking around costs one small write a beat', puts.join(','), 'live');
+  puts = [];
+  await quiet.beat(null, 'tok-looking', null);
+  now += 45000;
+  await quiet.beat(null, 'tok-looking', null);
+  eq('a guest who is in no game costs no write at all', puts.length, 0);
+  await quiet.touch('7002');
+  puts = [];
+  now += 2000;
+  await quiet.touch('7002');
+  now += 2000;
+  await quiet.touch('7002');
+  eq('a burst of page loads is not a burst of writes', puts.length, 0);
 
   /* ---- through the site ---- */
   const { env, store } = world();

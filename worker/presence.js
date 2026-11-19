@@ -4,9 +4,13 @@
  *
  * All of this changes every few seconds, which is exactly what KV is bad at (the free
  * plan allows about a thousand writes a day). So it lives in one Durable Object
- * instead: the live part in memory, and only the counters - visits, recently played and
- * play time - in its storage, written at most once a minute and only where something
- * changed.
+ * instead.
+ *
+ * Cloudflare puts an object like this to sleep after about ten quiet seconds, and its
+ * memory goes with it. Beats come 45 seconds apart, so on a quiet evening every beat
+ * meets a freshly woken object. Nothing here may therefore live in memory alone:
+ * whatever a call changes is written before the call answers (only the keys that really
+ * changed), and a woken object reads everything back before it does anything else.
  *
  * PresenceCore is the logic on its own, with the clock and the storage passed in, so it
  * can be driven straight from a test or from an in-process fake in local runs.
@@ -14,7 +18,7 @@
 
 const GONE_AFTER = 90000;       /* no beat for 90s = gone */
 const VISIT_WINDOW = 30 * 60000; /* one visit per person per game per half hour */
-const SAVE_EVERY = 60000;       /* visit counters reach storage at most once a minute */
+const TOUCH_EVERY = 15000;      /* a page load re-writes "I am here" at most this often */
 const MAX_WATCHED = 5000;
 const MAX_RECENT = 12;          /* how many games one member's "recently played" keeps */
 const MAX_TIMED = 500;          /* how many games one member's own play time keeps */
@@ -33,7 +37,9 @@ export class PresenceCore {
     this.rates = new Map();     /* key -> { start, n } */
     this.loaded = false;
     this.loading = null;
-    /* one flag per storage key, so an idle minute writes nothing at all */
+    this.ready = false;         /* storage has been read back; the maps can be trusted */
+    /* one flag per storage key, so a call that changed nothing writes nothing */
+    this.dirtyLive = false;
     this.dirtyVisits = false;
     this.dirtyRecent = false;
     this.dirtyTime = false;
@@ -87,9 +93,49 @@ export class PresenceCore {
           if (theirs.size) this.myTime.set(who, theirs);
         }
       }
+      /*
+       * The live part - who is here, who is in which game, which visits were already
+       * counted, the rate counters - as it stood when the object went to sleep. Rows
+       * that have gone stale in the meantime are simply not read back.
+       */
+      const live = await this.storage.get('live');
+      if (live && typeof live === 'object') {
+        const at = this.now();
+        const rows = (v) => (v && typeof v === 'object' ? Object.entries(v) : []);
+        const fresh = (row) => Array.isArray(row) && Number.isFinite(row[0]) &&
+          at - row[0] <= GONE_AFTER;
+        for (const [k, row] of rows(live.m)) {
+          if (fresh(row) && !this.members.has(k)) {
+            this.members.set(k, { at: row[0], game: typeof row[1] === 'string' ? row[1] : null });
+          }
+        }
+        for (const [k, row] of rows(live.g)) {
+          if (fresh(row) && typeof row[1] === 'string' && !this.guests.has(k) &&
+              this.guests.size < MAX_WATCHED) {
+            this.guests.set(k, { at: row[0], game: row[1] });
+          }
+        }
+        for (const [k, seen] of rows(live.v)) {
+          if (Number.isFinite(seen) && at - seen < VISIT_WINDOW && !this.seenVisit.has(k)) {
+            this.seenVisit.set(k, seen);
+          }
+        }
+        for (const [k, row] of rows(live.r)) {
+          if (Array.isArray(row) && Number.isFinite(row[0]) && Number.isFinite(row[1]) &&
+              Number.isFinite(row[2]) && at - row[0] <= row[2] && !this.rates.has(k)) {
+            this.rates.set(k, { start: row[0], n: row[1], w: row[2] });
+          }
+        }
+      }
     } catch (e) {
       /* a fresh object, or storage having a bad day: start from nothing */
     }
+    this.ready = true;
+  }
+
+  /* run the work once storage has been read back: at once when it already has */
+  whenReady(work) {
+    return this.ready ? work() : this.load().then(work);
   }
 
   sweep() {
@@ -141,6 +187,10 @@ export class PresenceCore {
      `creditTo` is the signed-in member's id even when their presence is hidden - they
      are beaten as a guest then, but their own play time is still theirs. */
   beat(who, token, game, creditTo) {
+    return this.whenReady(() => this.beatNow(who, token, game, creditTo));
+  }
+
+  beatNow(who, token, game, creditTo) {
     const at = this.now();
     const key = who ? String(who) : null;
     /* the row this beat is about to replace is what says how long they have been in
@@ -149,13 +199,16 @@ export class PresenceCore {
     const had = prev && prev.game ? prev.game : null;
     this.credit(prev, creditTo != null ? creditTo : key, at);
     const row = { at: at, game: game || null };
-    if (key) this.members.set(key, row);
-    else if (token) {
+    if (key) {
+      this.members.set(key, row);
+      this.dirtyLive = true;
+    } else if (token) {
       if (this.guests.size < MAX_WATCHED || this.guests.has(token)) this.guests.set(token, row);
+      /* a guest who is in no game is nobody's business and is not worth a write */
+      if (row.game || had) this.dirtyLive = true;
     }
     this.sweep();
-    /* a play session that just ended is worth one write; an idle minute is not */
-    return this.maybeSave(Boolean(had) && had !== row.game).then(() => ({ ok: true }));
+    return this.maybeSave().then(() => ({ ok: true }));
   }
 
   /*
@@ -164,24 +217,35 @@ export class PresenceCore {
    * pages - the leave beacon fires on every navigation, not only when a tab closes.
    */
   touch(who) {
-    if (!who) return { ok: true };
-    const key = String(who);
-    const row = this.members.get(key);
-    const at = this.now();
-    /* this rewrites `at`, so whatever time that row was owed has to be credited first */
-    this.credit(row, key, at);
-    this.members.set(key, { at: at, game: row ? row.game : null });
-    return { ok: true };
+    if (!who) return Promise.resolve({ ok: true });
+    return this.whenReady(() => {
+      const key = String(who);
+      const row = this.members.get(key);
+      const at = this.now();
+      /* a burst of page loads is one write, not one each: inside the window the row
+         is left exactly as it is, clock and all, so no time is owed twice */
+      if (row && at - row.at <= TOUCH_EVERY) return { ok: true };
+      /* this rewrites `at`, so whatever time that row was owed has to be credited first */
+      this.credit(row, key, at);
+      this.members.set(key, { at: at, game: row ? row.game : null });
+      this.dirtyLive = true;
+      return this.maybeSave().then(() => ({ ok: true }));
+    });
   }
 
   /* The way out. The tail of the stretch counts too, before the row goes. */
   leave(who, token, creditTo) {
-    const key = who ? String(who) : null;
-    const prev = key ? this.members.get(key) : (token ? this.guests.get(token) : null);
-    const credited = this.credit(prev, creditTo != null ? creditTo : key, this.now());
-    if (key) this.members.delete(key);
-    if (token) this.guests.delete(token);
-    return this.maybeSave(credited > 0).then(() => ({ ok: true }));
+    return this.whenReady(() => {
+      const key = who ? String(who) : null;
+      const prev = key ? this.members.get(key) : (token ? this.guests.get(token) : null);
+      this.credit(prev, creditTo != null ? creditTo : key, this.now());
+      if (key && this.members.delete(key)) this.dirtyLive = true;
+      if (token) {
+        const was = this.guests.get(token);
+        if (this.guests.delete(token) && was && was.game) this.dirtyLive = true;
+      }
+      return this.maybeSave().then(() => ({ ok: true }));
+    });
   }
 
   /*
@@ -218,6 +282,7 @@ export class PresenceCore {
       return { ok: true, counted: false };
     }
     this.seenVisit.set(key, at);
+    this.dirtyLive = true;
     this.visits.set(game, (this.visits.get(game) || 0) + 1);
     this.dirtyVisits = true;
     await this.maybeSave();
@@ -225,19 +290,18 @@ export class PresenceCore {
   }
 
   /*
-   * Only the keys that really changed are written, so a minute in which nobody played
-   * costs nothing and a minute of playing costs one put.
+   * Written straight away, because this object may be asleep ten seconds from now -
+   * but only the keys that really changed, so a call that changed nothing costs nothing.
    */
-  async maybeSave(force) {
+  async maybeSave() {
     if (!this.storage) return;
-    if (!this.dirtyVisits && !this.dirtyRecent && !this.dirtyTime) return;
-    const at = this.now();
-    if (!force && at - this.savedAt < SAVE_EVERY) return;
+    if (!this.dirtyLive && !this.dirtyVisits && !this.dirtyRecent && !this.dirtyTime) return;
     /* never write before reading: a cold object would otherwise put its handful of
        seconds where everything counted so far used to be */
     await this.load();
-    this.savedAt = at;
+    this.savedAt = this.now();
     const jobs = [];
+    if (this.dirtyLive) jobs.push(['live', this.liveOut(), 'dirtyLive']);
     if (this.dirtyVisits) {
       const out = {};
       for (const [k, v] of this.visits) out[k] = v;
@@ -267,6 +331,26 @@ export class PresenceCore {
         /* it stays dirty and is tried again at the next save */
       }
     }
+  }
+
+  /* The live part as it goes to storage: only what is still true right now. */
+  liveOut() {
+    const at = this.now();
+    const m = {};
+    const g = {};
+    const v = {};
+    const r = {};
+    for (const [k, row] of this.members) {
+      if (at - row.at <= GONE_AFTER) m[k] = [row.at, row.game || null];
+    }
+    for (const [k, row] of this.guests) {
+      if (row.game && at - row.at <= GONE_AFTER) g[k] = [row.at, row.game];
+    }
+    for (const [k, seen] of this.seenVisit) if (at - seen < VISIT_WINDOW) v[k] = seen;
+    for (const [k, row] of this.rates) {
+      if (Number.isFinite(row.w) && at - row.start <= row.w) r[k] = [row.start, row.n, row.w];
+    }
+    return { m: m, g: g, v: v, r: r };
   }
 
   /*
@@ -304,10 +388,18 @@ export class PresenceCore {
 
   /* A counter that would otherwise cost a KV write every time someone taps a heart. */
   rate(key, limit, windowMs) {
+    return this.whenReady(() => {
+      const out = this.rateNow(key, limit, windowMs);
+      return this.maybeSave().then(() => out);
+    });
+  }
+
+  rateNow(key, limit, windowMs) {
     const at = this.now();
     const row = this.rates.get(key);
+    this.dirtyLive = true;
     if (!row || at - row.start > windowMs) {
-      this.rates.set(key, { start: at, n: 1 });
+      this.rates.set(key, { start: at, n: 1, w: windowMs });
       if (this.rates.size > MAX_WATCHED) {
         for (const [k, v] of this.rates) if (at - v.start > windowMs) this.rates.delete(k);
       }
@@ -324,7 +416,7 @@ export class PresenceCore {
     if (cmd === 'leave') return this.leave(body.who, body.token, body.creditTo);
     if (cmd === 'visit') return this.visit(body.game, body.who);
     if (cmd === 'snapshot') {
-      if (body.touch) this.touch(body.touch);
+      if (body.touch) await this.touch(body.touch);
       return this.snapshot(body.recentFor);
     }
     if (cmd === 'touch') return this.touch(body.who);
