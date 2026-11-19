@@ -1567,6 +1567,33 @@ async function testPresenceCore() {
   snap = await core.snapshot();
   eq('and the same person counts again after half an hour', snap.visits['friend-one/game-a'], 3);
 
+  /* recently played: the member's own row, remembered here and nowhere else */
+  eq('a visit lands in that member\'s recently played',
+    (await core.snapshot('7001')).recent[0], 'friend-one/game-a');
+  await core.visit('friend-two/game-b', '7001');
+  await core.visit('friend-one/game-c', '7001');
+  let my = (await core.snapshot('7001')).recent;
+  eq('newest first', my.join(','), 'friend-one/game-c,friend-two/game-b,friend-one/game-a');
+  await core.visit('friend-two/game-b', '7001');
+  my = (await core.snapshot('7001')).recent;
+  eq('playing one again moves it to the front, without a second copy',
+    my.join(','), 'friend-two/game-b,friend-one/game-c,friend-one/game-a');
+  const replay = await core.visit('friend-two/game-b', '7001');
+  eq('and that replay inside the half hour is still not counted twice', replay.counted, false);
+  eq('it is still at the front', (await core.snapshot('7001')).recent[0], 'friend-two/game-b');
+  for (let i = 0; i < 14; i++) await core.visit('friend-one/many-' + i, '7001');
+  my = (await core.snapshot('7001')).recent;
+  eq('a member keeps twelve games at most', my.length, 12);
+  eq('the newest of them first', my[0], 'friend-one/many-13');
+  await core.visit('friend-one/game-z', 'ip:9.9.9.9');
+  await core.visit('friend-one/game-z', 'anon');
+  eq('a guest is remembered by nobody', (await core.snapshot('ip:9.9.9.9')).recent.length, 0);
+  eq('and nothing of theirs is filed under anon',
+    (await core.snapshot('anon')).recent.length, 0);
+  eq('nobody is handed somebody else\'s list',
+    (await core.snapshot('7002')).recent.length, 0);
+  eq('and asking for nobody\'s gives nothing away', (await core.snapshot()).recent.length, 0);
+
   /* the counters survive the object being put to sleep */
   const storage = core.storage;
   await core.maybeSave(true);
@@ -1574,6 +1601,13 @@ async function testPresenceCore() {
   const snap2 = await woken.snapshot();
   eq('visits come back after an eviction', snap2.visits['friend-one/game-a'], 3);
   eq('presence does not, which is fine', Object.keys(snap2.members).length, 0);
+  eq('recently played comes back too',
+    (await woken.snapshot('7001')).recent[0], 'friend-one/many-13');
+  await woken.forget('7001');
+  eq('and clearing it empties it', (await woken.snapshot('7001')).recent.length, 0);
+  const again = new PresenceCore(storage, () => now);
+  eq('for good, not until the next eviction',
+    (await again.snapshot('7001')).recent.length, 0);
 
   /* rate counting without touching KV */
   let left = null;
@@ -1647,6 +1681,34 @@ async function testPresenceRoutes() {
   hub = await call(env, '/api/hub');
   eq('the visit count shows', hub.body.games.find((g) => g.id === 'friend-one/plain-game').visits, 1);
 
+  /* recently played: in the payload, for the asker only */
+  let mineHub = await call(env, '/api/hub', { cookie: other });
+  eq('the game they just played is in their recently played',
+    (mineHub.body.me.recent || [])[0], 'friend-one/plain-game');
+  const theirs = await call(env, '/api/hub', { cookie: mine });
+  eq('and not in anybody else\'s', (theirs.body.me.recent || []).length, 0);
+  const outside = await call(env, '/api/hub');
+  eq('a signed-out visitor is told nothing at all', outside.body.me, null);
+  ok('no recently played is written into the games or the members',
+    JSON.stringify({ g: outside.body.games, m: outside.body.members }).indexOf('recent') < 0);
+
+  /* a game they can no longer see drops out of it */
+  await call(env, '/api/games/unpublish', { body: { repo: 'plain-game' }, cookie: mine });
+  mineHub = await call(env, '/api/hub', { cookie: other });
+  eq('a game that is a draft again is not in their row', (mineHub.body.me.recent || []).length, 0);
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  mineHub = await call(env, '/api/hub', { cookie: other });
+  eq('and it is back once it is published again', (mineHub.body.me.recent || []).length, 1);
+
+  const clear = await call(env, '/api/me/recent-clear', { body: {}, cookie: other });
+  eq('clearing it answers ok', clear.body.ok, true);
+  mineHub = await call(env, '/api/hub', { cookie: other });
+  eq('and the row is empty afterwards', (mineHub.body.me.recent || []).length, 0);
+  const noCookie = await call(env, '/api/me/recent-clear', { body: {} });
+  eq('a signed-out visitor cannot clear anything', noCookie.res.status, 401);
+  const noOrigin = await call(env, '/api/me/recent-clear', { body: {}, cookie: other, origin: 'https://evil.test' });
+  eq('and neither can another site', noOrigin.res.status, 403);
+
   /* the "show when I am online" switch */
   const off = await call(env, '/api/me/presence', { body: { show: false }, cookie: mine });
   eq('presence can be switched off', off.body.show, false);
@@ -1657,6 +1719,10 @@ async function testPresenceRoutes() {
   ok('but their play still counts in the number playing',
     hub.body.games.find((g) => g.id === 'friend-one/plain-game').active >= 1,
     String(hub.body.games.find((g) => g.id === 'friend-one/plain-game').active));
+  await call(env, '/api/presence/visit', { body: { game: 'friend-one/plain-game' }, cookie: mine });
+  const hidden = await call(env, '/api/hub', { cookie: mine });
+  eq('an invisible member still gets their own recently played',
+    (hidden.body.me.recent || [])[0], 'friend-one/plain-game');
 
   /* and with no Durable Object at all the site just has no counts */
   const bare = world({ PRESENCE: null });

@@ -46,7 +46,7 @@
     var games = published();
     people.className = 'people-grid' + (members.length <= 6 ? ' people-big' : '');
     Hub.sortPeople(members).forEach(function (m) {
-      people.appendChild(Hub.personCard(m, games));
+      people.appendChild(Hub.personCard(m, games, hub.me));
     });
   }
 
@@ -86,6 +86,7 @@
 
     var pres = document.getElementById('pPresence');
     Hub.clear(pres);
+    pres.className = 'pres-row';
     var p = Hub.presenceText(m, published());
     var line = Hub.el('span', 'presence-line ' + p.dot);
     line.appendChild(Hub.el('i', 'dot'));
@@ -97,6 +98,14 @@
       line.appendChild(Hub.el('span', '', p.text));
     }
     pres.appendChild(line);
+    /* in a game right now, and not me: a way straight in beside the line */
+    var inGame = Hub.joinableGame(m, published());
+    if (inGame && !isMe) {
+      var join = Hub.joinButton(inGame.id);
+      join.setAttribute('aria-label', 'Join ' + (m.name || m.login) +
+        ' in ' + (inGame.title || 'their game'));
+      pres.appendChild(join);
+    }
 
     var acts = document.getElementById('pActs');
     Hub.clear(acts);

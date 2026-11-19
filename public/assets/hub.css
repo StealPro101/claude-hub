@@ -396,6 +396,19 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .person .s { font-size: 12px; color: var(--soft); }
 
+/* the way into a game somebody is in - no friends list, everyone can join everyone */
+.join-btn {
+  display: inline-flex; align-items: center; justify-content: center; height: 30px;
+  padding: 0 16px; border: 0; border-radius: 15px; background: #1a9a52; color: #fff;
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  transition: background .15s ease;
+}
+.join-btn:hover { background: #17a857; color: #fff; text-decoration: none; }
+.join-btn:focus-visible { outline: 2px solid #0b5; outline-offset: 2px; }
+.person .join-btn { margin-top: 8px; }
+.pres-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.pres-row .presence-line { margin-top: 0; }
+
 /* six people or fewer: bigger pictures, the same rule the games follow */
 .people-big .person { width: 150px; flex: 0 0 150px; }
 .people-big .person img { width: 104px; height: 104px; }

@@ -222,6 +222,41 @@ var Hub = (function () {
     return cut(v / 1000000, 'M');
   }
 
+  /* ---------- recently played ----------
+   *
+   * A member's list is kept by the server and is private to them. A signed-out
+   * visitor gets the same row from this browser alone - it never leaves it.
+   */
+
+  var RECENT_KEY = 'hubRecent';
+  var RECENT_MAX = 12;
+
+  function recentHere() {
+    try {
+      var raw = JSON.parse(lsGet(RECENT_KEY) || '[]');
+      if (!Array.isArray(raw)) return [];
+      return raw.filter(function (id) { return typeof id === 'string'; }).slice(0, RECENT_MAX);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function noteRecent(id) {
+    if (!id) return;
+    var list = recentHere().filter(function (x) { return x !== id; });
+    list.unshift(id);
+    try {
+      lsSet(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
+    } catch (e) { /* blocked storage: no row, no harm */ }
+  }
+
+  function forgetRecentHere() { lsDel(RECENT_KEY); }
+
+  /* the ids to draw: the member's own list, or this browser's */
+  function recentIds(d) {
+    return (d && d.me) ? ((d.me.recent || []).slice(0, RECENT_MAX)) : recentHere();
+  }
+
   /* ---------- data ---------- */
 
   var dataPromise = null;
@@ -700,7 +735,34 @@ var Hub = (function () {
     return { dot: 'offline', text: p.lastSeen ? 'Offline · ' + ago(p.lastSeen) : 'Offline' };
   }
 
-  function personCard(member, games) {
+  /*
+   * A way into the game somebody is in right now. There is no friends list here and
+   * there will not be one: if they are playing something you can see, you can join
+   * them. The note tells the game's own page that this was a press on Join, which is
+   * the only thing that ever starts a game on its own.
+   */
+  function joinButton(gameId, label) {
+    var a = el('a', 'join-btn', label || 'Join');
+    a.href = '/play.html?g=' + encodeURIComponent(gameId);
+    a.addEventListener('click', function () {
+      try {
+        sessionStorage.setItem('hubJoin', gameId);
+      } catch (e) { /* the game page still opens, just not straight into it */ }
+    });
+    return a;
+  }
+
+  /* the game this person is in, but only if the person looking can see it */
+  function joinableGame(member, games) {
+    var p = (member && member.presence) || {};
+    if (p.state !== 'playing' || !p.game) return null;
+    for (var i = 0; games && i < games.length; i++) {
+      if (games[i].id === p.game && games[i].status !== 'draft') return games[i];
+    }
+    return null;
+  }
+
+  function personCard(member, games, me) {
     var wrap = el('div', 'person');
     var a = el('a', '');
     a.href = '/players.html#' + encodeURIComponent(member.login);
@@ -716,6 +778,14 @@ var Hub = (function () {
     line.appendChild(el('i', 'dot'));
     line.appendChild(el('span', '', p.text));
     wrap.appendChild(line);
+    var inGame = joinableGame(member, games);
+    var isMe = Boolean(me && String(me.login).toLowerCase() === String(member.login).toLowerCase());
+    if (inGame && !isMe) {
+      var join = joinButton(inGame.id);
+      join.setAttribute('aria-label', 'Join ' + (member.name || member.login) +
+        ' in ' + (inGame.title || 'their game'));
+      wrap.appendChild(join);
+    }
     return wrap;
   }
 
@@ -790,6 +860,8 @@ var Hub = (function () {
     data: data, post: post, bar: bar, box: box, rail: rail,
     sizeFor: sizeFor, peopleSize: peopleSize,
     thumb: thumb, personCard: personCard, presenceText: presenceText, sortPeople: sortPeople,
+    joinButton: joinButton, joinableGame: joinableGame,
+    recentIds: recentIds, noteRecent: noteRecent, forgetRecentHere: forgetRecentHere,
     starIcon: starIcon, favoriteToggle: toggle, paintStar: paint,
     coverInto: coverInto, coverUrl: coverUrl, playUrl: playUrl, avatarUrl: avatarUrl,
     profileUrl: profileUrl, memberOf: memberOf, ago: ago, niceDate: niceDate,

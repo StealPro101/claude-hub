@@ -3,8 +3,9 @@
  * what there is to play. Every row is a plain bold heading over a one-row carousel that
  * runs the whole width of the page.
  *
- * For a signed-in member with favourites, their own row is pinned at the very top. It
- * is private: nobody else's page ever shows it, and no count of it exists anywhere.
+ * For a signed-in member with favourites, their own row is pinned at the very top, with
+ * what they played last under it. Both are private: nobody else's page ever shows them,
+ * and no count of either exists anywhere.
  */
 (function () {
   'use strict';
@@ -56,9 +57,26 @@
       }), Hub.sizeFor(list.length)));
     }
 
+    /* what you played last: yours alone, from the server if you are signed in and
+       from this browser if you are not */
+    var ids = Hub.recentIds(d);
+    var played = [];
+    ids.forEach(function (id) {
+      games.forEach(function (g) { if (g.id === id && played.indexOf(g) < 0) played.push(g); });
+    });
+    if (played.length) {
+      var rp = Hub.box('Recently played', { tight: true, row: true });
+      rp.body.appendChild(Hub.rail(played.map(function (g) {
+        return Hub.thumb(g, members, ctx);
+      }), Hub.sizeFor(played.length)));
+      main.appendChild(rp.box);
+    }
+
     /* who is about */
     if (members.length) {
-      var people = Hub.sortPeople(members).map(function (m) { return Hub.personCard(m, games); });
+      var people = Hub.sortPeople(members).map(function (m) {
+        return Hub.personCard(m, games, d.me);
+      });
       var pb = Hub.box('Players (' + members.length + ')', {
         moreHref: '/players.html', tight: true, row: true
       });

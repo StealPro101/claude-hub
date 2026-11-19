@@ -14,6 +14,7 @@ const GONE_AFTER = 90000;       /* no beat for 90s = gone */
 const VISIT_WINDOW = 30 * 60000; /* one visit per person per game per half hour */
 const SAVE_EVERY = 60000;       /* visit counters reach storage at most once a minute */
 const MAX_WATCHED = 5000;
+const MAX_RECENT = 12;          /* how many games one member's "recently played" keeps */
 
 export class PresenceCore {
   constructor(storage, now) {
@@ -22,6 +23,7 @@ export class PresenceCore {
     this.members = new Map();   /* memberId -> { at, game } */
     this.guests = new Map();    /* token -> { at, game } */
     this.visits = new Map();    /* gameId -> count */
+    this.recent = new Map();    /* memberId -> [gameId, ...] newest first, their eyes only */
     this.seenVisit = new Map(); /* who|game -> at */
     this.rates = new Map();     /* key -> { start, n } */
     this.loaded = false;
@@ -38,6 +40,14 @@ export class PresenceCore {
       if (saved && typeof saved === 'object') {
         for (const [k, v] of Object.entries(saved)) {
           if (Number.isFinite(v)) this.visits.set(k, Number(v));
+        }
+      }
+      const mine = await this.storage.get('recent');
+      if (mine && typeof mine === 'object') {
+        for (const [k, v] of Object.entries(mine)) {
+          if (Array.isArray(v)) {
+            this.recent.set(k, v.filter((id) => typeof id === 'string').slice(0, MAX_RECENT));
+          }
         }
       }
     } catch (e) {
@@ -87,13 +97,39 @@ export class PresenceCore {
     return { ok: true };
   }
 
+  /*
+   * "Recently played", for one member, kept here and told to nobody else. A guest
+   * (a token or an ip) is never remembered - there is nobody to remember.
+   */
+  remember(who, game) {
+    const key = String(who || '');
+    if (!key || key === 'anon' || key.indexOf('ip:') === 0) return;
+    const had = this.recent.get(key);
+    if (!had && this.recent.size >= MAX_WATCHED) return;
+    const list = (had || []).filter((id) => id !== game);
+    list.unshift(game);
+    this.recent.set(key, list.slice(0, MAX_RECENT));
+    this.dirty = true;
+  }
+
+  forget(who) {
+    const key = String(who || '');
+    if (key && this.recent.delete(key)) this.dirty = true;
+    return this.maybeSave(true).then(() => ({ ok: true }));
+  }
+
   async visit(game, who) {
     await this.load();
     if (!game) return { ok: false };
     const key = (who || 'anon') + '|' + game;
     const at = this.now();
+    /* playing it again inside the half hour still brings it to the front */
+    this.remember(who, game);
     const last = this.seenVisit.get(key);
-    if (last && at - last < VISIT_WINDOW) return { ok: true, counted: false };
+    if (last && at - last < VISIT_WINDOW) {
+      await this.maybeSave();
+      return { ok: true, counted: false };
+    }
     this.seenVisit.set(key, at);
     this.visits.set(game, (this.visits.get(game) || 0) + 1);
     this.dirty = true;
@@ -109,15 +145,22 @@ export class PresenceCore {
     this.dirty = false;
     const out = {};
     for (const [k, v] of this.visits) out[k] = v;
+    const mine = {};
+    for (const [k, v] of this.recent) mine[k] = v;
     try {
       await this.storage.put('visits', out);
+      await this.storage.put('recent', mine);
     } catch (e) {
       this.dirty = true;
     }
   }
 
-  /* Everything the site needs, in one answer. */
-  async snapshot() {
+  /*
+   * Everything the site needs, in one answer. `recentFor` is one member id: their own
+   * list comes back and nobody else's, ever. It is separate from `touch`, because
+   * somebody who switched presence off still gets their own recently played.
+   */
+  async snapshot(recentFor) {
     await this.load();
     this.sweep();
     const active = {};
@@ -131,7 +174,10 @@ export class PresenceCore {
     }
     const visits = {};
     for (const [k, v] of this.visits) visits[k] = v;
-    return { at: this.now(), active: active, members: members, visits: visits };
+    const recent = recentFor ? (this.recent.get(String(recentFor)) || []).slice() : [];
+    return {
+      at: this.now(), active: active, members: members, visits: visits, recent: recent
+    };
   }
 
   /* A counter that would otherwise cost a KV write every time someone taps a heart. */
@@ -157,9 +203,10 @@ export class PresenceCore {
     if (cmd === 'visit') return this.visit(body.game, body.who);
     if (cmd === 'snapshot') {
       if (body.touch) this.touch(body.touch);
-      return this.snapshot();
+      return this.snapshot(body.recentFor);
     }
     if (cmd === 'touch') return this.touch(body.who);
+    if (cmd === 'forget') return this.forget(body.who);
     if (cmd === 'rate') return this.rate(body.key, Number(body.limit), Number(body.windowMs));
     if (cmd === 'flush') return this.maybeSave(true);
     return { ok: false, error: 'no such presence command' };
@@ -173,7 +220,7 @@ export class PresenceCore {
  */
 export function presenceClient(env) {
   const binding = env && env.PRESENCE;
-  const EMPTY = { at: Date.now(), active: {}, members: {}, visits: {} };
+  const EMPTY = { at: Date.now(), active: {}, members: {}, visits: {}, recent: [] };
 
   async function call(body) {
     if (!binding) return null;
@@ -194,9 +241,15 @@ export function presenceClient(env) {
 
   return {
     available: Boolean(binding),
-    /* one round trip: "I am here" and "who else is" together */
-    async snapshot(touchWho) {
-      return (await call({ cmd: 'snapshot', touch: touchWho || null })) || EMPTY;
+    /* one round trip: "I am here", "who else is", and my own recently played */
+    async snapshot(touchWho, recentFor) {
+      return (await call({
+        cmd: 'snapshot', touch: touchWho || null, recentFor: recentFor || null
+      })) || EMPTY;
+    },
+    /* clearing one member's recently played; a dead object simply has nothing to clear */
+    async forget(who) {
+      return (await call({ cmd: 'forget', who: who })) || { ok: true };
     },
     async beat(who, token, game) {
       return (await call({ cmd: 'beat', who: who, token: token, game: game })) || { ok: true };

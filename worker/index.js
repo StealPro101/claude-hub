@@ -425,6 +425,12 @@ async function handle(request, env, ctx) {
       return json({ ok: true, show: on });
     }
 
+    /* "recently played" is the asker's own row, so only they can empty it */
+    if (path === '/api/me/recent-clear') {
+      await presenceClient(env).forget(String(member.id));
+      return json({ ok: true });
+    }
+
     /* reporting a game: a line in the owner's activity log, nothing public */
     if (path === '/api/games/report') {
       const allow = await allowance(env, store, 'report:' + member.id, REPORTS_PER_DAY, 86400000);

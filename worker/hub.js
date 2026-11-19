@@ -698,7 +698,10 @@ export async function hubPayload(env, store, session) {
   /* Loading a page is itself a sign of life, unless the person asked to be invisible. */
   const meRec = session ? state.members[String(Number(session.id))] : null;
   const touchMe = meRec && !meRec.hidePresence ? meRec.id : null;
-  const snap = await presenceClient(env).snapshot(touchMe);
+  /* my own recently played comes back even when I am invisible - it is mine, not a sign
+     of life, so it is asked for separately from the touch */
+  const recentFor = meRec ? String(meRec.id) : null;
+  const snap = await presenceClient(env).snapshot(touchMe, recentFor);
 
   /* Drafts belong to their maker (so they can set them up and test them) and to the
      Hub owner. To everybody else they do not exist at all. */
@@ -719,6 +722,18 @@ export async function hubPayload(env, store, session) {
   for (const g of games) {
     g.active = Number(snap.active[g.id]) || 0;
     g.visits = Number(snap.visits[g.id]) || 0;
+  }
+
+  /*
+   * Recently played, for the asker alone. Only games they can see as published go in,
+   * so a draft of somebody else's, or one that has been taken off, simply drops out.
+   */
+  const open = new Map();
+  for (const g of onShow.concat(house)) open.set(String(g.id).toLowerCase(), g.id);
+  const myRecent = [];
+  for (const id of Array.isArray(snap.recent) ? snap.recent : []) {
+    const real = open.get(String(id).toLowerCase());
+    if (real && myRecent.indexOf(real) < 0) myRecent.push(real);
   }
 
   /* a profile counts what the world can see, never someone's drafts */
@@ -755,7 +770,9 @@ export async function hubPayload(env, store, session) {
     me: session ? {
       id: session.id, login: session.login, admin: admin,
       /* my own list, newest first, so the Favourites row can be pinned on top */
-      favorites: myFavorites
+      favorites: myFavorites,
+      /* and what I played last, which nobody else is ever told */
+      recent: myRecent
     } : null,
     members: members.map((m) => ({
       login: m.login,

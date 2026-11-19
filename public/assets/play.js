@@ -29,6 +29,19 @@
     wanted = '';
   }
 
+  /*
+   * A press on Join, over on the Hub, leaves this one note behind. It is read and
+   * thrown away at once, so a reload, a shared link or a bookmark can never start a
+   * game by itself - only a press on Join does.
+   */
+  var joinWanted = '';
+  try {
+    joinWanted = sessionStorage.getItem('hubJoin') || '';
+    sessionStorage.removeItem('hubJoin');
+  } catch (e) {
+    joinWanted = '';
+  }
+
   /* a reload or a shared link never drops anyone straight into a game */
   if (location.hash === '#play') {
     try {
@@ -341,6 +354,8 @@
       try {
         frame.focus();
       } catch (e) { /* the first click in the game focuses it */ }
+      /* signed out, "recently played" is this browser's own business */
+      if (!me) Hub.noteRecent(game.id);
       /* say where we are first, then count the visit */
       beat.where(game.id)
         .then(function () { return Hub.post('/api/presence/visit', { game: game.id }); })
@@ -396,6 +411,9 @@
       if (!inGame || ev.key !== 'Escape') return;
       askLeave(ask.classList.contains('off'));
     });
+
+    /* joined from somebody's card: straight in, now that everything is wired */
+    if (joinWanted && joinWanted === game.id) enter();
   }
 
   function tinted(title, text) {
