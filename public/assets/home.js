@@ -3,8 +3,8 @@
  * what there is to play. Every row is a plain bold heading over a one-row carousel that
  * runs the whole width of the page.
  *
- * For a signed-in member with favourites, their own row is pinned at the very top, with
- * what they played last under it. Both are private: nobody else's page ever shows them,
+ * The people come first. Then, for a signed-in member with favourites, their own row,
+ * with what they played last under it. Both are private: nobody else's page ever shows them,
  * and no count of either exists anywhere.
  */
 (function () {
@@ -24,9 +24,10 @@
     var games = (d.games || []).filter(function (g) { return g.status !== 'draft'; });
     var ctx = { me: d.me, onChange: function () { drawFavorites(); } };
     var favBox = null;
+    var pb = null;
     Hub.clear(main);
 
-    /* ---- mine, pinned on top ---- */
+    /* ---- mine, pinned right under the people ---- */
     function favorites() {
       var order = (d.me && d.me.favorites) || [];
       var out = [];
@@ -49,12 +50,25 @@
       }
       if (!favBox) {
         favBox = Hub.box('Favorites', { sub: 'only you see these', tight: true, row: true });
-        main.insertBefore(favBox.box, main.firstChild);
+        /* right under the people, above everything else */
+        main.insertBefore(favBox.box, pb ? pb.box.nextSibling : main.firstChild);
       }
       Hub.clear(favBox.body);
       favBox.body.appendChild(Hub.rail(list.map(function (g) {
         return Hub.thumb(g, members, ctx);
       }), Hub.sizeFor(list.length)));
+    }
+
+    /* who is about: the very first row, above everything of yours */
+    if (members.length) {
+      var people = Hub.sortPeople(members).map(function (m) {
+        return Hub.personCard(m, games, d.me);
+      });
+      pb = Hub.box('Players (' + members.length + ')', {
+        moreHref: '/players.html', tight: true, row: true
+      });
+      pb.body.appendChild(Hub.rail(people, Hub.peopleSize(people.length)));
+      main.appendChild(pb.box);
     }
 
     /* what you played last: yours alone, from the server if you are signed in and
@@ -70,18 +84,6 @@
         return Hub.thumb(g, members, ctx);
       }), Hub.sizeFor(played.length)));
       main.appendChild(rp.box);
-    }
-
-    /* who is about */
-    if (members.length) {
-      var people = Hub.sortPeople(members).map(function (m) {
-        return Hub.personCard(m, games, d.me);
-      });
-      var pb = Hub.box('Players (' + members.length + ')', {
-        moreHref: '/players.html', tight: true, row: true
-      });
-      pb.body.appendChild(Hub.rail(people, Hub.peopleSize(people.length)));
-      main.appendChild(pb.box);
     }
 
     if (!games.length) {
