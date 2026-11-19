@@ -30,7 +30,17 @@ var HubPrompt = (function () {
       '- If I have not said which game: ASK ME what game I want, or whether to use the',
       '  one already in this folder.',
       '',
-      'THE GAME (these are the things that break games on the Hub)',
+      'IF THE GAME ALREADY EXISTS (you or another chat already built it and it works)',
+      '- Upload it exactly as it is. Do not rewrite, restyle, rename or improve anything.',
+      '  The only file you may add is the empty .nojekyll one.',
+      '- Read the list under THE GAME as a checklist only. If something on it would break',
+      '  on the Hub (a path that starts with a slash, a start page that is not index.html',
+      '  at the top level, a build step), tell me exactly what and ASK ME before you touch it.',
+      '- If the game needs its own server program to run (node, python, a database, its',
+      '  own websocket server), STOP and ASK ME: GitHub only hosts files, so that part',
+      '  would not work there. Do not rebuild the game around it on your own.',
+      '',
+      'THE GAME (for a new game: these are the things that break games on the Hub)',
       '- Plain HTML, CSS and JavaScript that runs straight from the files: no build step,',
       '  no server, nothing to install.',
       '- index.html at the top level of the repo. Every path relative (assets/ship.png,',
@@ -48,7 +58,7 @@ var HubPrompt = (function () {
       '- Keep it smooth: one requestAnimationFrame loop, movement scaled by the time',
       '  between frames, and pictures and sounds loaded before the game starts.',
       '',
-      'MULTIPLAYER',
+      'MULTIPLAYER (only when you are making a new game)',
       '- Same device (two players on one keyboard, or pass the phone) always works: offer',
       '  it whenever it fits the game.',
       '- Online: there is no game server. Use PeerJS (MIT licence). Put a copy of',
@@ -85,8 +95,9 @@ var HubPrompt = (function () {
       '',
       'WHEN YOU ARE DONE',
       'Tell me the play address, and that the game is now waiting for me as a draft on the',
-      'Hub: My games > Add a game (it also turns up by itself within 15 minutes). There I',
-      'give it a name, a description and a cover picture and press Publish.'
+      'Hub: I refresh My games > Add a game and it is in the list (it also turns up by',
+      'itself within 15 minutes). There I give it a name, a description and a cover',
+      'picture and press Publish.'
     ].join('\n');
   }
 
