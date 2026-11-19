@@ -18,6 +18,10 @@
  *                       code=ABCD    a private server by its code (the old way in, and
  *                                    still exactly the same apart from honouring max)
  * and one plain GET, /room/servers?g=<game>, for the list of a game's public servers.
+ * The Hub's own game page shows that list too, through its own route
+ * (/api/rooms/servers?g=<hub game id>), which has no Origin to go by and works the game
+ * key out of the play address instead - gameKeyFromPlayUrl below, the one rule both
+ * sides use.
  *
  * Public and private servers live in separate name spaces, so a code can never be
  * guessed into a public server and a public id can never be typed as a code:
@@ -123,6 +127,17 @@ export const WAYS = ['any', 'server', 'new', 'code'];
  * before it is ever uploaded - its servers can never meet a real game's (see gameKeyOf).
  */
 export function originLogin(origin, logins) {
+  const login = loginOfOrigin(origin);
+  if (!login) return null;
+  if (login === 'local') return 'local';
+  return logins && logins.has(login) ? login : null;
+}
+
+/* Which member a web address belongs to, by the address alone - the host rule on its
+   own, with nothing about who is a member. originLogin checks that part; this is also
+   what the Hub's own side uses to work out a game's room namespace from its play
+   address (see gameKeyFromPlayUrl). */
+export function loginOfOrigin(origin) {
   if (typeof origin !== 'string' || !origin) return null;
   let u = null;
   try {
@@ -135,9 +150,7 @@ export function originLogin(origin, logins) {
   }
   if (u.protocol !== 'https:') return null;
   const m = GITHUB_IO_RE.exec(u.hostname);
-  if (!m) return null;
-  const login = m[1].toLowerCase();
-  return logins && logins.has(login) ? login : null;
+  return m ? m[1].toLowerCase() : null;
 }
 
 /* Two different members' games can never share a server, and neither can two games of
@@ -149,6 +162,51 @@ export function gameKeyOf(login, game) {
 
 export function gameTagOf(gameKey) {
   return 'g:' + gameKey;
+}
+
+/*
+ * THE GAME'S NAME, FROM THE ADDRESS IT IS PLAYED AT - the one place on the server that
+ * knows the rule public/room.js uses by default, so the two can never drift apart.
+ *
+ * A game that says nothing names itself after the folders of its own address: the game
+ * at /space-dodge/ is "space-dodge" and the one at /games/space-dodge/ is
+ * "games-space-dodge", so one member's two games are never the same game. The page's own
+ * file name (index.html) is not a folder. Keep this the same as gameFromPath() in
+ * public/room.js; the tests compare the two against each other.
+ */
+export function gameNameFromPath(pathname) {
+  const raw = String(pathname === undefined || pathname === null ? '' : pathname).split('/');
+  const parts = [];
+  for (let i = 0; i < raw.length; i++) {
+    const bit = raw[i];
+    if (!bit) continue;
+    /* the page itself (index.html) is not a folder */
+    if (i === raw.length - 1 && /\.[A-Za-z0-9]{1,8}$/.test(bit)) continue;
+    parts.push(bit);
+  }
+  const name = parts.join('-').replace(/[^A-Za-z0-9._-]/g, '').toLowerCase().slice(0, 60);
+  return name || 'game';
+}
+
+/*
+ * The whole room key of a game the HUB knows, worked out from the play address the Hub
+ * computed itself (owner + repo): the owner's login from the host, the game's name from
+ * the path. An address that is nobody's Pages site (and not a local copy) has no rooms
+ * at all and answers ''.
+ *
+ * A game that hands the library its own { game: 'x' } is not covered by this and simply
+ * has no list on the Hub - said in one line in the library's own notes.
+ */
+export function gameKeyFromPlayUrl(url) {
+  let u = null;
+  try {
+    u = new URL(String(url === undefined || url === null ? '' : url));
+  } catch (e) {
+    return '';
+  }
+  const login = loginOfOrigin(u.origin);
+  if (!login) return '';
+  return gameKeyOf(login, gameNameFromPath(u.pathname));
 }
 
 /* a private server: its code, in capitals */

@@ -15,7 +15,9 @@ import {
 import { kvStore } from './store.js';
 import { getState, update, gameId as keyFor } from './state.js';
 import { PresenceCore, presenceClient } from './presence.js';
-import { RoomsCore, roomRequest, serversRequest } from './rooms.js';
+import {
+  RoomsCore, roomRequest, serversRequest, gameKeyFromPlayUrl, isPublicId
+} from './rooms.js';
 import { makeGitHub, makeBudget } from './github.js';
 import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
@@ -264,6 +266,54 @@ async function handle(request, env, ctx) {
     return json(payload);
   }
 
+  /*
+   * THE SERVERS OF ONE GAME, for the Hub's own game page.
+   *
+   * /room/servers above answers a GAME, and works out whose it is from the Origin the
+   * browser sets. The Hub's own page has no such Origin to go by - a same-origin fetch
+   * sends none - so this is its own route: the game is looked up in the Hub's own data,
+   * it has to be one the person asking may see (a published game, or their own draft, or
+   * anything if they are an admin), and WHICH rooms it owns is worked out from the play
+   * address the Hub itself computed from owner + repo. Nothing here comes from the
+   * client but the game's id.
+   */
+  if (path === '/api/rooms/servers') {
+    if (method !== 'GET') return errorJson(405, 'GET only');
+    if (!rateLimit(ip, 'gameservers', 60, 60000)) return errorJson(429, 'slow down a moment');
+    const wanted = url.searchParams.get('g') || '';
+    if (!/^[A-Za-z0-9._/-]{1,140}$/.test(wanted)) return errorJson(400, 'which game?');
+    const store = storeOf(env);
+    const session = await readSession(request, env, store);
+    let game = null;
+    if (wanted.indexOf('house/') === 0) {
+      game = (await houseGamesWithEdits(env, store)).find((g) => g.id === wanted) || null;
+    } else {
+      const state = await getState(store);
+      game = Object.keys(state.games).map((k) => state.games[k])
+        .find((g) => g && String(g.id).toLowerCase() === wanted.toLowerCase()) || null;
+    }
+    /* a draft is as private here as it is everywhere else */
+    if (!game || !maySee(env, game, session)) return errorJson(404, 'no such game');
+    const binding = env.PRESENCE;
+    /* the one shared rule, so this and the library can never name a game differently */
+    const gameKey = gameKeyFromPlayUrl(game.url);
+    /* a game whose address is nobody's Pages site has no servers to list */
+    if (!binding || !gameKey) return json({ ok: true, servers: [] });
+    let servers = [];
+    try {
+      const stub = binding.get(binding.idFromName('rooms'));
+      const res = await stub.fetch(new Request(
+        'https://rooms.invalid/servers?game=' + encodeURIComponent(gameKey)
+      ));
+      const body = await res.json();
+      if (body && Array.isArray(body.servers)) servers = body.servers;
+    } catch (e) {
+      /* the rooms being unreachable is an empty list, never an error page */
+      servers = [];
+    }
+    return json({ ok: true, servers: servers });
+  }
+
   if (path === '/api/me' && method === 'GET') {
     const store = storeOf(env);
     const session = await readSession(request, env, store);
@@ -418,6 +468,12 @@ async function handle(request, env, ctx) {
 
     const token = typeof body.token === 'string' && /^[A-Za-z0-9_-]{6,40}$/.test(body.token)
       ? body.token : null;
+    /*
+     * Which server of that game they are in. The shape is checked here as well as in
+     * the object: only a public server id ever gets through, so a private server's code
+     * cannot be put on a presence row however it is sent.
+     */
+    const server = isPublicId(body.server) ? String(body.server) : '';
     const presence = presenceClient(env);
 
     if (path === '/api/presence/visit') {
@@ -438,9 +494,11 @@ async function handle(request, env, ctx) {
     }
     if (path !== '/api/presence/beat') return errorJson(404, 'no such endpoint');
 
-    /* a member who switched presence off is counted, never named */
-    if (member && !member.hidePresence) await presence.beat(member.id, null, game, creditTo);
-    else {
+    /* a member who switched presence off is counted, never named - and a nameless row
+       has nobody to join, so it is never told which server either */
+    if (member && !member.hidePresence) {
+      await presence.beat(member.id, null, game, creditTo, server);
+    } else {
       await presence.beat(
         null, token || ('anon-' + ip.replace(/[^A-Za-z0-9]/g, '')), game, creditTo
       );

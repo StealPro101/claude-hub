@@ -135,9 +135,23 @@ var Hub = (function () {
     return /^[A-Za-z0-9-]{1,39}$/.test(String(login)) ? 'https://github.com/' + login : null;
   }
 
-  /* A game's play address is only ever the one the server computed from its owner. */
+  /*
+   * A game's play address is only ever the one the server computed from its owner.
+   *
+   * The one other thing it can be is a game served by a Hub running on this computer,
+   * and only while the page itself is being served from there (http on localhost) - the
+   * dev server's fixture games, so the whole Play path can be driven offline. On the
+   * real site this can never happen: the Hub is https and not localhost, and the page's
+   * own CSP only ever allows a frame from https://*.github.io anyway.
+   */
+  function localHub() {
+    return location.protocol === 'http:' &&
+      (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+  }
+
   function playUrl(game) {
     if (!game || typeof game.url !== 'string') return null;
+    if (localHub() && game.url.indexOf(location.origin + '/') === 0) return game.url;
     if (!/^[A-Za-z0-9-]{1,39}$/.test(String(game.owner || ''))) return null;
     var want = 'https://' + String(game.owner).toLowerCase() + '.github.io/';
     return game.url.indexOf(want) === 0 ? game.url : null;
@@ -764,12 +778,17 @@ var Hub = (function () {
    * them. The note tells the game's own page that this was a press on Join, which is
    * the only thing that ever starts a game on its own.
    */
-  function joinButton(gameId, label) {
+  function joinButton(gameId, label, serverId) {
     var a = el('a', 'join-btn', label || 'Join');
     a.href = '/play.html?g=' + encodeURIComponent(gameId);
     a.addEventListener('click', function () {
       try {
         sessionStorage.setItem('hubJoin', gameId);
+        /* and which server of it they are in, so this lands in THEIRS and not in
+           whichever one the game would have picked. Cleared when there is none, so an
+           earlier press can never send anybody into a server nobody asked for. */
+        if (serverId) sessionStorage.setItem('hubJoinServer', serverId);
+        else sessionStorage.removeItem('hubJoinServer');
       } catch (e) { /* the game page still opens, just not straight into it */ }
     });
     return a;
@@ -783,6 +802,16 @@ var Hub = (function () {
       if (games[i].id === p.game && games[i].status !== 'draft') return games[i];
     }
     return null;
+  }
+
+  /*
+   * Which server of that game they are in. The Hub only ever says this about a PUBLIC
+   * server and only about somebody who is visible, and the shape is checked again here
+   * before it is used - a server id is a thing the Hub made, never anything else.
+   */
+  function joinableServer(member) {
+    var s = String((member && member.presence && member.presence.server) || '');
+    return /^s-[a-z0-9]{4,12}$/.test(s) ? s : '';
   }
 
   function personCard(member, games, me) {
@@ -804,7 +833,7 @@ var Hub = (function () {
     var inGame = joinableGame(member, games);
     var isMe = Boolean(me && String(me.login).toLowerCase() === String(member.login).toLowerCase());
     if (inGame && !isMe) {
-      var join = joinButton(inGame.id);
+      var join = joinButton(inGame.id, null, joinableServer(member));
       join.setAttribute('aria-label', 'Join ' + (member.name || member.login) +
         ' in ' + (inGame.title || 'their game'));
       wrap.appendChild(join);
@@ -837,7 +866,10 @@ var Hub = (function () {
    * being looked at, plus one "I am off" on the way out.
    */
   function beat(gameId) {
-    var payload = { game: gameId || null, token: token() };
+    /* server: which server of that game, when the game itself has said so. It only ever
+       means anything to a signed-in member whose presence is on - the Hub drops it
+       otherwise - and it is how a friend's Join finds the right server. */
+    var payload = { game: gameId || null, token: token(), server: '' };
     var timer = null;
 
     function send() {
@@ -863,8 +895,9 @@ var Hub = (function () {
       if (timer) clearInterval(timer);
     });
     return {
-      where: function (id) {
+      where: function (id, server) {
         payload.game = id || null;
+        payload.server = payload.game && server ? String(server) : '';
         return send();
       }
     };
@@ -883,7 +916,7 @@ var Hub = (function () {
     data: data, post: post, bar: bar, box: box, rail: rail,
     sizeFor: sizeFor, peopleSize: peopleSize,
     thumb: thumb, personCard: personCard, presenceText: presenceText, sortPeople: sortPeople,
-    joinButton: joinButton, joinableGame: joinableGame,
+    joinButton: joinButton, joinableGame: joinableGame, joinableServer: joinableServer,
     recentIds: recentIds, noteRecent: noteRecent, forgetRecentHere: forgetRecentHere,
     starIcon: starIcon, favoriteToggle: toggle, paintStar: paint,
     coverInto: coverInto, coverUrl: coverUrl, playUrl: playUrl, avatarUrl: avatarUrl,

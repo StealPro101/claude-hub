@@ -76,6 +76,12 @@
  * a "no servers yet" list from it and let the player press Play anyway.
  * If the page's address carries ?hubserver=<id>, play() uses it on its own, so a link
  * into a friend's server works without your game doing anything.
+ * Leave game out unless you really need it: the Hub's own page for your game lists your
+ * servers by working the name out of your address the same way, and a game that names
+ * itself something else gets no Servers list there (everything else still works).
+ * Shown inside the Hub, the library also tells the page around it which PUBLIC server
+ * this player is in, so a friend pressing Join beside their name lands in the same one.
+ * A private server's code is never sent, and your game has nothing to do either way.
  *
  * 'open' fires again after a reconnect. 'close' is the end: why is 'left' (you called
  * leave), 'lost' (the Hub could not be reached after five tries), 'full' (that server
@@ -265,6 +271,33 @@ var HubRoom = (function () {
   var FROM_URL = serverFromUrl();
 
   /*
+   * WHEN THE GAME IS SHOWN INSIDE THE HUB, the page around it is told which server this
+   * player ended up in, so a friend pressing Join on the Hub lands in the same one. It
+   * is sent after every hello (the first join and every reconnect) and once more, empty,
+   * on the way out.
+   *
+   * It is addressed to the Hub and nowhere else: a game framed by any other site simply
+   * has its message dropped by the browser. A PRIVATE server's code is never sent - it
+   * would be a way in for anybody who could see it - so a private server says server:''.
+   * Nothing here can throw, and a game that is not framed sends nothing at all.
+   */
+  function tellHub(server, isPrivate, players, max) {
+    try {
+      if (typeof window === 'undefined' || !window.parent || window.parent === window) return;
+      window.parent.postMessage({
+        hubRoom: 1,
+        server: isPrivate ? '' : String(server || ''),
+        private: Boolean(isPrivate),
+        players: Number(players) || 0,
+        max: Number(max) || 0
+      }, HUB);
+    } catch (e) {
+      /* no parent, a browser that will not post, a Hub that is not there: never a
+         reason for the game itself to notice anything */
+    }
+  }
+
+  /*
    * One way in, four shapes of it:
    *   'any'     a public server with space, or a new one
    *   'server'  that public server by id (another one if it is full)
@@ -338,6 +371,8 @@ var HubRoom = (function () {
       finished = true;
       room.connected = false;
       clearTimers();
+      /* out of the game: the Hub stops saying this player is in a server */
+      tellHub('', false, 0, 0);
       emit('close', why);
     }
 
@@ -415,6 +450,8 @@ var HubRoom = (function () {
         }
         room.connected = true;
         clearTimers();
+        /* the Hub around this game, if there is one, before the game's own handler runs */
+        tellHub(room.server, room.isPrivate, room.players.length, room.max);
         emit('open', { me: room.me, host: room.host, players: room.players.slice() });
         return;
       }

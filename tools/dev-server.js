@@ -139,11 +139,23 @@ async function toRequest(req) {
   });
 }
 
+/*
+ * The Hub's own pages only ever frame a game from https://*.github.io - which is right,
+ * and which also means the in-game frame could never be driven offline, where there is
+ * no Pages. So the DEV SERVER, and only the dev server, adds this computer to frame-src
+ * on its way out. The Worker's own CSP is untouched: nothing deployed sees this.
+ */
+function devFrames(csp) {
+  return String(csp).replace('frame-src https://*.github.io',
+    'frame-src https://*.github.io ' + ORIGIN);
+}
+
 async function send(res, response) {
   const headers = {};
   const cookies = [];
   response.headers.forEach((v, k) => {
     if (k.toLowerCase() === 'set-cookie') cookies.push(v);
+    else if (k.toLowerCase() === 'content-security-policy') headers[k] = devFrames(v);
     else headers[k] = v;
   });
   if (typeof response.headers.getSetCookie === 'function') {

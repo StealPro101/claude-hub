@@ -6,6 +6,14 @@
  *   node tools/seed-fixture.js 9        nine published games, most with covers
  *   node tools/seed-fixture.js 0        the empty shelf
  *   node tools/seed-fixture.js 40       a shelf that has to scroll
+ *   node tools/seed-fixture.js 9 --rooms   and one game that really has servers
+ *
+ * --rooms adds ONE more published game whose play address is the rooms check page as
+ * the dev server itself serves it (http://127.0.0.1:8797/games/room-test/...), so the
+ * whole multiplayer path - the Servers list, Join on a row, Join beside a friend's name -
+ * can be driven in a browser with no GitHub Pages and no internet. It is only ever in
+ * this fixture: nothing on the real site has an address like that, and the Hub only
+ * frames such a game while the page itself is being served from this computer.
  *
  * The cover pictures are written here as real PNGs (a tiny encoder below, using the
  * zlib that ships with node) - nothing is downloaded.
@@ -130,7 +138,23 @@ const MEMBERS = [
   { id: 9001, login: 'sp101-admin', name: 'The Owner' }
 ];
 
-function build(count) {
+/*
+ * The one game in the fixture that really has servers. Its address is the check page on
+ * this computer's own Hub, with a query already on it - which is also what proves the
+ * Hub adds ?hubserver= to an address that already has one.
+ */
+const ROOMS_ORIGIN = 'http://127.0.0.1:' + (Number(process.env.PORT) || 8797);
+const ROOMS_GAME = {
+  ownerId: 7001,
+  owner: 'friend-one',
+  repo: 'room-check',
+  title: 'Room Check',
+  description: 'Two tabs, one server: the plain check that online play works.',
+  category: 'demo',
+  url: ROOMS_ORIGIN + '/games/room-test/?hub=' + encodeURIComponent(ROOMS_ORIGIN)
+};
+
+function build(count, withRooms) {
   const state = { v: 5, members: {}, games: {}, house: {}, bans: {}, tombs: {}, settings: null };
   const blobs = {};
   const favorites = {};
@@ -202,17 +226,47 @@ function build(count) {
     if (state.members[id]) state.members[id].favorites = favorites[id].slice(0, 100);
   }
 
+  if (withRooms) {
+    const g = ROOMS_GAME;
+    state.games[g.ownerId + '/' + g.repo] = {
+      id: g.owner + '/' + g.repo,
+      ownerId: g.ownerId,
+      owner: g.owner,
+      repo: g.repo,
+      title: g.title,
+      description: g.description,
+      howto: ['Press Play public in two tabs.', 'Then look at the Servers list.'].join('\n'),
+      notes: 'A connection check, not a game.',
+      category: g.category,
+      emoji: '',
+      url: g.url,
+      repoUrl: 'https://github.com/' + g.owner + '/' + g.repo,
+      stars: 0,
+      updated: new Date().toISOString(),
+      added: '2026-11-01T00:00:00Z',
+      source: 'manual',
+      status: 'published',
+      locked: true,
+      cover: null,
+      hidden: false,
+      featured: false,
+      metaAt: '2026-11-18T00:00:00Z'
+    };
+  }
+
   return { data: { state: JSON.stringify(state) }, blobs: blobs, state: state };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const count = Number(process.argv[2] || 9);
-  const { data, blobs } = build(count);
+  const withRooms = process.argv.includes('--rooms');
+  const { data, blobs } = build(count, withRooms);
   fs.mkdirSync(path.dirname(STORE), { recursive: true });
   fs.writeFileSync(STORE, JSON.stringify(data, null, 2));
   fs.writeFileSync(STORE.replace(/\.json$/, '') + '-blobs.json', JSON.stringify(blobs));
   /* a picture for the browser check to upload through the real file input */
   fs.writeFileSync(path.join(root, '.tmp-test', 'upload.png'), coverPng(3));
-  console.log('fixture written: ' + count + ' games, ' +
-    Object.keys(blobs).length + ' covers -> ' + STORE);
+  console.log('fixture written: ' + (count + (withRooms ? 1 : 0)) + ' games, ' +
+    Object.keys(blobs).length + ' covers -> ' + STORE +
+    (withRooms ? '\n  with the rooms check game at ' + ROOMS_GAME.url : ''));
 }

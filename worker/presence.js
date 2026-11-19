@@ -14,7 +14,16 @@
  *
  * PresenceCore is the logic on its own, with the clock and the storage passed in, so it
  * can be driven straight from a test or from an in-process fake in local runs.
+ *
+ * A beat may also say WHICH SERVER of that game the player is in, so a friend's Join
+ * lands them in the same one. It is kept on a MEMBER's row only - a guest is counted,
+ * never named, so there is nobody to join - and only if it is really a public server id
+ * (isPublicId); a private server's code is never sent here and would be refused if it
+ * were. It is written through with the row like everything else, so it survives the
+ * object going to sleep, and a beat without one clears it.
  */
+
+import { isPublicId } from './rooms.js';
 
 const GONE_AFTER = 90000;       /* no beat for 90s = gone */
 const VISIT_WINDOW = 30 * 60000; /* one visit per person per game per half hour */
@@ -27,7 +36,7 @@ export class PresenceCore {
   constructor(storage, now) {
     this.storage = storage || null;
     this.now = now || (() => Date.now());
-    this.members = new Map();   /* memberId -> { at, game } */
+    this.members = new Map();   /* memberId -> { at, game, server } */
     this.guests = new Map();    /* token -> { at, game } */
     this.visits = new Map();    /* gameId -> count */
     this.recent = new Map();    /* memberId -> [gameId, ...] newest first, their eyes only */
@@ -106,7 +115,14 @@ export class PresenceCore {
           at - row[0] <= GONE_AFTER;
         for (const [k, row] of rows(live.m)) {
           if (fresh(row) && !this.members.has(k)) {
-            this.members.set(k, { at: row[0], game: typeof row[1] === 'string' ? row[1] : null });
+            /* row[2] is which server of that game they are in, when there is one: an
+               older row simply has no third item, and anything that is not a public
+               server id is read back as no server at all */
+            this.members.set(k, {
+              at: row[0],
+              game: typeof row[1] === 'string' ? row[1] : null,
+              server: row[1] && isPublicId(row[2]) ? row[2] : ''
+            });
           }
         }
         for (const [k, row] of rows(live.g)) {
@@ -186,11 +202,11 @@ export class PresenceCore {
 
      `creditTo` is the signed-in member's id even when their presence is hidden - they
      are beaten as a guest then, but their own play time is still theirs. */
-  beat(who, token, game, creditTo) {
-    return this.whenReady(() => this.beatNow(who, token, game, creditTo));
+  beat(who, token, game, creditTo, server) {
+    return this.whenReady(() => this.beatNow(who, token, game, creditTo, server));
   }
 
-  beatNow(who, token, game, creditTo) {
+  beatNow(who, token, game, creditTo, server) {
     const at = this.now();
     const key = who ? String(who) : null;
     /* the row this beat is about to replace is what says how long they have been in
@@ -200,6 +216,10 @@ export class PresenceCore {
     this.credit(prev, creditTo != null ? creditTo : key, at);
     const row = { at: at, game: game || null };
     if (key) {
+      /* which server, for a member who is in a game and really named a public one. A
+         beat without one clears whatever was there - leaving the game, or a game that
+         never had servers. */
+      row.server = row.game && isPublicId(server) ? String(server) : '';
       this.members.set(key, row);
       this.dirtyLive = true;
     } else if (token) {
@@ -227,7 +247,13 @@ export class PresenceCore {
       if (row && at - row.at <= TOUCH_EVERY) return { ok: true };
       /* this rewrites `at`, so whatever time that row was owed has to be credited first */
       this.credit(row, key, at);
-      this.members.set(key, { at: at, game: row ? row.game : null });
+      /* a page load says nothing about the game or the server: whatever the beats said
+         is kept exactly as it was */
+      this.members.set(key, {
+        at: at,
+        game: row ? row.game : null,
+        server: row ? (row.server || '') : ''
+      });
       this.dirtyLive = true;
       return this.maybeSave().then(() => ({ ok: true }));
     });
@@ -341,7 +367,11 @@ export class PresenceCore {
     const v = {};
     const r = {};
     for (const [k, row] of this.members) {
-      if (at - row.at <= GONE_AFTER) m[k] = [row.at, row.game || null];
+      if (at - row.at > GONE_AFTER) continue;
+      /* the third item only when there is one: an ordinary row stays the size it was */
+      m[k] = row.game && row.server
+        ? [row.at, row.game, row.server]
+        : [row.at, row.game || null];
     }
     for (const [k, row] of this.guests) {
       if (row.game && at - row.at <= GONE_AFTER) g[k] = [row.at, row.game];
@@ -364,7 +394,12 @@ export class PresenceCore {
     const active = {};
     const members = {};
     for (const [id, row] of this.members) {
-      members[id] = { at: row.at, game: row.game || null };
+      members[id] = {
+        at: row.at,
+        game: row.game || null,
+        /* only a real public server, and only while they are in a game */
+        server: row.game && isPublicId(row.server) ? row.server : ''
+      };
       if (row.game) active[row.game] = (active[row.game] || 0) + 1;
     }
     for (const row of this.guests.values()) {
@@ -412,7 +447,9 @@ export class PresenceCore {
 
   async handle(body) {
     const cmd = body && body.cmd;
-    if (cmd === 'beat') return this.beat(body.who, body.token, body.game, body.creditTo);
+    if (cmd === 'beat') {
+      return this.beat(body.who, body.token, body.game, body.creditTo, body.server);
+    }
     if (cmd === 'leave') return this.leave(body.who, body.token, body.creditTo);
     if (cmd === 'visit') return this.visit(body.game, body.who);
     if (cmd === 'snapshot') {
@@ -467,10 +504,12 @@ export function presenceClient(env) {
     async forget(who) {
       return (await call({ cmd: 'forget', who: who })) || { ok: true };
     },
-    /* creditTo: whose own play time this beat belongs to, hidden presence and all */
-    async beat(who, token, game, creditTo) {
+    /* creditTo: whose own play time this beat belongs to, hidden presence and all.
+       server: which public server of that game, for a named member only. */
+    async beat(who, token, game, creditTo, server) {
       return (await call({
-        cmd: 'beat', who: who, token: token, game: game, creditTo: creditTo || null
+        cmd: 'beat', who: who, token: token, game: game, creditTo: creditTo || null,
+        server: server || ''
       })) || { ok: true };
     },
     async leave(who, token, creditTo) {

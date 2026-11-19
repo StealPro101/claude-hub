@@ -585,6 +585,29 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 /* a number that is really a short sentence ("under 1 min") keeps its small letters */
 .gp-stats .n.plain { text-transform: none; }
 
+/* ---------- the servers of one game ----------
+   Under the numbers, and only when the game has players in it right now: one row per
+   server, the fullest first, with a way straight into that one. The same lines and the
+   same type as the row of numbers above it, so it reads as part of the page. */
+
+.gp-servers { margin-top: 24px; }
+.gp-sv-head { display: flex; align-items: baseline; gap: 10px; padding-bottom: 10px; }
+.gp-sv-head h2 { font-size: 20px; font-weight: 700; color: var(--head); }
+.gp-sv-head .gp-sv-sub { font-size: 12.5px; color: var(--soft); }
+.gp-sv-head .gp-sv-again { margin-left: auto; align-self: center; }
+.gp-sv-rows { border-top: 1px solid var(--line); }
+/* how full it is, then the places, then the way in at the right edge - under Refresh */
+.gp-sv-row { display: flex; align-items: center; gap: 14px; flex-wrap: nowrap;
+  padding: 11px 2px; border-bottom: 1px solid var(--line); }
+.gp-sv-row .join-btn { margin-left: auto; }
+.gp-sv-n { font-size: 14px; font-weight: 600; color: var(--head); min-width: 92px; }
+.gp-sv-meter { display: flex; align-items: center; gap: 4px; }
+.gp-sv-meter i { width: 9px; height: 9px; border-radius: 50%; background: var(--line);
+  border: 1px solid var(--line-hover); }
+.gp-sv-meter i.on { background: #1a9a52; border-color: #17854a; }
+.gp-servers .join-btn[disabled] { background: var(--strip); color: var(--soft);
+  cursor: default; }
+
 .gp-about { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
 .gp-about--one { grid-template-columns: minmax(0, 1fr); }
 .gp-about .tbox { margin-bottom: 0; }
@@ -916,6 +939,18 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
   .gp-stats .k { font-size: 13.5px; }
   .gp-stats .n { font-size: 15px; margin-top: 0; text-align: right; }
   .gp-about { grid-template-columns: 1fr; }
+  /* a server row on a phone: the count and the places at the left, a button a thumb
+     can hit at the right */
+  .gp-servers { margin-top: 20px; }
+  .gp-sv-head h2 { font-size: 17px; }
+  /* a phone: how full it is above its places, so a twelve-player server cannot push
+     the button off the line, and every row is the same height */
+  .gp-sv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 14px; padding: 11px 2px; }
+  .gp-sv-n { font-size: 13.5px; }
+  .gp-sv-meter { grid-row: 2; grid-column: 1; }
+  .gp-servers .join-btn { grid-row: 1 / span 2; grid-column: 2; align-self: center;
+    margin-left: 0; height: 38px; padding: 0 20px; border-radius: 19px; font-size: 14px; }
 }
 
 @media (max-width: 520px) {

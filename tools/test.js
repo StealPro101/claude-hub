@@ -19,7 +19,8 @@ import { PresenceCore } from '../worker/presence.js';
 import { fakePresence, fakeStorage, fakeSocket, fakeRoomState } from './fake-presence.js';
 import {
   RoomsCore, roomRequest, serversRequest, gameOfRoom, gameKeyOf, publicKeyOf, isPublicId,
-  clampMax, MAX_PLAYERS, MAX_SOCKETS, MAX_MSG, MAX_LIST, RATE_BURST, RATE_DROPS, DAILY_MSGS
+  clampMax, gameNameFromPath, gameKeyFromPlayUrl,
+  MAX_PLAYERS, MAX_SOCKETS, MAX_MSG, MAX_LIST, RATE_BURST, RATE_DROPS, DAILY_MSGS
 } from '../worker/rooms.js';
 import {
   clean, pretty, isLogin, isRepoName, playUrl, normalizeHubJson, repoEligible, hasTopic,
@@ -2698,11 +2699,25 @@ async function libRoom(opts) {
       }
     }
   };
+  /*
+   * The page around the game, when there is one. Shown inside the Hub, the library
+   * posts which server it ended up in to window.parent; with no parent at all (the
+   * ordinary case, a game on its own page) it must post nothing and throw nothing.
+   */
+  const posted = [];
+  if (o.framed) {
+    sandbox.window.parent = {
+      postMessage: (msg, target) => posted.push({ msg: msg, target: target })
+    };
+  } else if (o.selfParent) {
+    sandbox.window.parent = sandbox.window;
+  }
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox);
   return {
     HubRoom: sandbox.HubRoom,
     opened: opened,
+    posted: posted,
     /* only the short waits: the 15-second connect guard is not what a test is after */
     tick: () => {
       const due = timers.filter((t) => t.ms <= 1000);
@@ -2848,6 +2863,72 @@ async function testRoomLibrary() {
     noFetch = JSON.stringify(list);
   });
   eq('and so is a browser with no fetch at all', noFetch, '[]');
+
+  /* ---- what the page around the game is told ---- */
+  const hello = (server, isPrivate, players, max) => ({
+    t: 'hello', you: 'p1', host: 'p1', code: isPrivate ? server : '', server: server,
+    private: isPrivate, max: max,
+    players: players.map((id) => ({ id: id, name: id }))
+  });
+
+  const framed = await libRoom({ framed: true });
+  framed.HubRoom.play({ max: 3 });
+  eq('nothing is posted before the Hub has answered', framed.posted.length, 0);
+  framed.say(framed.opened[0], hello('s-ab12cd', false, ['p1', 'p2'], 3));
+  eq('the page around the game is told once the server is known',
+    framed.posted.length, 1);
+  eq('and told which server', framed.posted[0].msg.server, 's-ab12cd');
+  eq('that it is a public one', framed.posted[0].msg.private, false);
+  eq('how many are in it', framed.posted[0].msg.players, 2);
+  eq('and how many fit', framed.posted[0].msg.max, 3);
+  eq('the message says what it is, so nothing else is mistaken for it',
+    framed.posted[0].msg.hubRoom, 1);
+  eq('and it is addressed to the Hub, not to whoever is framing the game',
+    framed.posted[0].target, 'https://hub.sp101.workers.dev');
+  /*
+   * A reconnect is a second hello, and the page has to hear it too. A dropped
+   * connection on its own says nothing: the library is coming back to the SAME server,
+   * and the player never left it.
+   */
+  framed.opened[0].onclose();
+  framed.tick();
+  eq('a dropped connection is not a message', framed.posted.length, 1);
+  framed.say(framed.opened[1], hello('s-ab12cd', false, ['p1'], 3));
+  eq('the hello after a reconnect is', framed.posted.length, 2);
+  eq('and it names the server again', framed.posted[1].msg.server, 's-ab12cd');
+  eq('with the count it has now', framed.posted[1].msg.players, 1);
+
+  const quit = await libRoom({ framed: true });
+  const leaving = quit.HubRoom.play({ max: 2 });
+  quit.say(quit.opened[0], hello('s-zz9988', false, ['p1'], 2));
+  leaving.leave();
+  eq('leaving says there is no server any more',
+    quit.posted[quit.posted.length - 1].msg.server, '');
+  eq('and that it is not a private one either',
+    quit.posted[quit.posted.length - 1].msg.private, false);
+
+  const hidden = await libRoom({ framed: true });
+  hidden.HubRoom.host({ max: 2 });
+  hidden.say(hidden.opened[0], hello('KTPM', true, ['p1'], 2));
+  eq('a private server is never named to the page', hidden.posted[0].msg.server, '');
+  eq('it only says that it is private', hidden.posted[0].msg.private, true);
+  ok('its code is nowhere in the message',
+    JSON.stringify(hidden.posted[0].msg).indexOf('KTPM') < 0,
+    JSON.stringify(hidden.posted[0].msg));
+
+  /* a game on its own page, with no Hub around it, must not notice any of this */
+  const alone = await libRoom();
+  const aloneRoom = alone.HubRoom.play({ max: 2 });
+  alone.say(alone.opened[0], hello('s-ab12cd', false, ['p1'], 2));
+  eq('a game with no parent window still joins', aloneRoom.server, 's-ab12cd');
+  aloneRoom.leave();
+  eq('and leaves, with nothing thrown', aloneRoom.connected, false);
+  const own = await libRoom({ selfParent: true });
+  const ownRoom = own.HubRoom.play({ max: 2 });
+  own.say(own.opened[0], hello('s-ab12cd', false, ['p1'], 2));
+  eq('a page that is its own parent is not a Hub, and is told nothing',
+    own.posted.length, 0);
+  eq('and the game is in its server all the same', ownRoom.server, 's-ab12cd');
 }
 
 /* ---------- 15g. rooms through the site ---------- */
@@ -3017,6 +3098,291 @@ async function testServerList() {
   eq('nothing about a server outlives its players', emptied.body.servers.length, 2);
 }
 
+/* ---------- 15i. one rule for a game's name, both sides of it ---------- */
+
+/*
+ * The library names a game after the folders of its own address; the Hub has to work out
+ * the very same name from the play address it computed itself, or the Servers list on a
+ * game's page would be somebody else's list. There is ONE helper for it on the server
+ * (gameNameFromPath / gameKeyFromPlayUrl) and this group runs it against the library's
+ * own derivation, address by address.
+ */
+async function testGameKeyRule() {
+  console.log('rooms: one name for one game');
+  const addresses = [
+    ['/space-dodge/', 'space-dodge', 'a game in its own repo'],
+    ['/games/space-dodge/', 'games-space-dodge', 'a game in a folder of folders'],
+    ['/space-dodge/index.html', 'space-dodge', 'an address with the page itself on it'],
+    ['/Space-Dodge/', 'space-dodge', 'capitals'],
+    ['/', 'game', 'a Pages site that IS the game'],
+    ['/a/b/c/play.html', 'a-b-c', 'three folders and a file'],
+    ['/space%20dodge/', 'space20dodge', 'something the browser had to encode']
+  ];
+  for (const [pathname, want, what] of addresses) {
+    const lib = await libRoom({ pathname: pathname });
+    lib.HubRoom.play({ max: 2 });
+    const asked = askedFor(lib.opened[0].url).g;
+    eq('the library names it that way: ' + what, asked, want);
+    eq('and the Hub works out the same name: ' + what, gameNameFromPath(pathname), asked);
+    eq('so the whole key is the member and that name: ' + what,
+      gameKeyFromPlayUrl('https://friend-one.github.io' + pathname), 'friend-one/' + want);
+  }
+
+  eq('a Pages site at its root is that member\'s game "game"',
+    gameKeyFromPlayUrl('https://friend-two.github.io/'), 'friend-two/game');
+  eq('the login is lower case however it was written',
+    gameKeyFromPlayUrl('https://Friend-One.github.io/Space-Dodge/'), 'friend-one/space-dodge');
+  eq('a house game is named after its folders too',
+    gameKeyFromPlayUrl('https://stealpro101.github.io/claude-hub/games/rare-pull/'),
+    'stealpro101/claude-hub-games-rare-pull');
+  eq('a copy being tested on this computer has its own corner',
+    gameKeyFromPlayUrl('http://127.0.0.1:8797/games/room-test/?hub=x'),
+    'local/games-room-test');
+  eq('and the query is no part of the name',
+    gameKeyFromPlayUrl('http://localhost:8797/games/room-test/'),
+    gameKeyFromPlayUrl('http://localhost:8797/games/room-test/?hub=x&y=2'));
+  eq('another website has no rooms at all',
+    gameKeyFromPlayUrl('https://evil.example.com/space-dodge/'), '');
+  eq('nor has something that only looks like Pages',
+    gameKeyFromPlayUrl('https://friend-one.github.io.evil.example/x/'), '');
+  eq('nor a game served without https',
+    gameKeyFromPlayUrl('http://friend-one.github.io/space-dodge/'), '');
+  eq('and nonsense is nothing, not a crash', gameKeyFromPlayUrl('not a url'), '');
+  eq('neither is nothing at all', gameKeyFromPlayUrl(null), '');
+}
+
+/* ---------- 15j. the Servers list on the Hub's own game page ---------- */
+
+async function testHubServerList() {
+  console.log('rooms: the list on the Hub\'s own page');
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  const admin = await joined('sp101-admin', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'snake-dash' }, cookie: mine });
+  await call(env, '/api/games/publish', { body: { repo: 'snake-dash' }, cookie: mine });
+  /* and one that stays a draft, which only its owner and an admin may even see */
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/games/add', { body: { repo: 'tiny-puzzle' }, cookie: other });
+  await call(env, '/api/games/publish', { body: { repo: 'tiny-puzzle' }, cookie: other });
+
+  /* real sockets in real servers behind the route, as the game's own list has */
+  const core = env.PRESENCE.roomsCore;
+  const put = async (game, id, pid, max) => {
+    const ws = fakeSocket(pid);
+    await core.connect(ws, {
+      game: game, way: id.indexOf('s-') === 0 ? 'server' : 'code', room: game + '/' + id,
+      strict: true, max: max || 3, pid: pid, name: 'P'
+    });
+    return ws;
+  };
+  await put('friend-one/snake-dash', 's-aaa111', 'player-one');
+  await put('friend-one/snake-dash', 's-aaa111', 'player-two');
+  await put('friend-one/snake-dash', 's-bbb222', 'player-three');
+  const secret = await put('friend-one/snake-dash', 'ABCD', 'player-four');
+  await put('friend-one/plain-game', 's-ddd444', 'player-six');
+  await put('friend-two/tiny-puzzle', 's-ccc333', 'player-five');
+
+  const seen = await call(env, '/api/rooms/servers?g=friend-one/snake-dash');
+  eq('anybody looking at a published game is told its servers', seen.res.status, 200);
+  eq('fullest first, with the counts and the max', JSON.stringify(seen.body),
+    JSON.stringify({
+      ok: true,
+      servers: [{ id: 's-aaa111', players: 2, max: 3 }, { id: 's-bbb222', players: 1, max: 3 }]
+    }));
+  ok('a private server is not in it', seen.text.indexOf('ABCD') < 0, seen.text);
+  ok('and neither is another game\'s server', seen.text.indexOf('s-ccc333') < 0);
+  ok('the list is never cached', (seen.res.headers.get('Cache-Control') || '').indexOf('no-store') >= 0,
+    seen.res.headers.get('Cache-Control'));
+  eq('a signed-in member sees the same list',
+    JSON.stringify((await call(env, '/api/rooms/servers?g=friend-one/snake-dash', { cookie: other })).body),
+    JSON.stringify(seen.body));
+  eq('the name is matched the way the rest of the site matches it',
+    JSON.stringify((await call(env, '/api/rooms/servers?g=FRIEND-ONE/Snake-Dash')).body.servers),
+    JSON.stringify(seen.body.servers));
+
+  const theirs = await call(env, '/api/rooms/servers?g=friend-two/tiny-puzzle');
+  eq('another member\'s game has its own servers',
+    JSON.stringify(theirs.body.servers), JSON.stringify([{ id: 's-ccc333', players: 1, max: 3 }]));
+
+  const draft = await call(env, '/api/rooms/servers?g=friend-one/plain-game');
+  eq('a draft is not there to be asked about', draft.res.status, 404);
+  eq('not even by another member',
+    (await call(env, '/api/rooms/servers?g=friend-one/plain-game', { cookie: other })).res.status, 404);
+  const owner = await call(env, '/api/rooms/servers?g=friend-one/plain-game', { cookie: mine });
+  eq('its own maker may ask, so they can test it', owner.res.status, 200);
+  eq('and sees its server', JSON.stringify(owner.body.servers),
+    JSON.stringify([{ id: 's-ddd444', players: 1, max: 3 }]));
+  eq('an admin may too',
+    (await call(env, '/api/rooms/servers?g=friend-one/plain-game', { cookie: admin })).res.status, 200);
+
+  eq('a game that is not on the Hub is a 404',
+    (await call(env, '/api/rooms/servers?g=friend-one/no-such-game')).res.status, 404);
+  eq('and so is an address that climbs out of the games',
+    (await call(env, '/api/rooms/servers?g=' + encodeURIComponent('../secrets'))).res.status, 404);
+  eq('a game id with no business being one is refused outright',
+    (await call(env, '/api/rooms/servers?g=' + encodeURIComponent('<script>'))).res.status, 400);
+  eq('nothing at all is a 400',
+    (await call(env, '/api/rooms/servers')).res.status, 400);
+  eq('the list is only ever read',
+    (await call(env, '/api/rooms/servers?g=friend-one/snake-dash', { body: {}, cookie: mine })).res.status, 405);
+
+  /* the house game: published by definition, and its rooms live under its own folders */
+  const house = await call(env, '/api/rooms/servers?g=house/rare-pull');
+  eq('a house game may be asked about as well', house.res.status, 200);
+  eq('and has no servers until somebody opens one',
+    JSON.stringify(house.body.servers), '[]');
+  /* the house games are served out of the Hub's own Pages site, so their rooms live
+     under the owner's login and every folder of that address */
+  await put('stealpro101/claude-hub-games-rare-pull', 's-eee555', 'player-seven');
+  eq('a server in the house game shows up under the name its own address gives it',
+    JSON.stringify((await call(env, '/api/rooms/servers?g=house/rare-pull')).body.servers),
+    JSON.stringify([{ id: 's-eee555', players: 1, max: 3 }]));
+
+  /* one IP cannot sit on this route all day */
+  const ip = '10.9.9.9';
+  let limited = null;
+  for (let i = 0; i < 62; i++) {
+    limited = await call(env, '/api/rooms/servers?g=friend-one/snake-dash', { ip: ip });
+  }
+  eq('asking over and over from one place is slowed down', limited.res.status, 429);
+  eq('while everybody else is answered as usual',
+    (await call(env, '/api/rooms/servers?g=friend-one/snake-dash')).res.status, 200);
+
+  /* a server that empties leaves the list by itself, exactly as the game's own does */
+  secret.readyState = 3;
+  await core.close(secret);
+  eq('and a private one leaving changes nothing public',
+    JSON.stringify((await call(env, '/api/rooms/servers?g=friend-one/snake-dash')).body.servers),
+    JSON.stringify(seen.body.servers));
+
+  /* with no object bound at all the page simply has no servers */
+  const bare = world({ PRESENCE: null });
+  const b1 = await joined('friend-one', bare.env, bare.store);
+  await call(bare.env, '/api/games/add', { body: { repo: 'snake-dash' }, cookie: b1 });
+  await call(bare.env, '/api/games/publish', { body: { repo: 'snake-dash' }, cookie: b1 });
+  const noRooms = await call(bare.env, '/api/rooms/servers?g=friend-one/snake-dash');
+  eq('no rooms object is an empty list, not an error', noRooms.res.status, 200);
+  eq('and the page shows no Servers section at all',
+    JSON.stringify(noRooms.body), JSON.stringify({ ok: true, servers: [] }));
+}
+
+/* ---------- 15k. which server somebody is in, on their presence row ---------- */
+
+async function testServerPresence() {
+  console.log('rooms: which server a friend is in');
+  let now = 1000000;
+  const storage = fakeStorage();
+  const core = new PresenceCore(storage, () => now);
+
+  await core.beat('7001', null, 'friend-one/snake-dash', '7001', 's-ab12cd');
+  let snap = await core.snapshot();
+  eq('a member in a server has it on their row', snap.members['7001'].server, 's-ab12cd');
+
+  /* THE SLEEP RULE: a brand new core on the same storage is what a wake really is */
+  const woken = new PresenceCore(storage, () => now);
+  snap = await woken.snapshot();
+  eq('and it is still there after the object has been to sleep',
+    snap.members['7001'].server, 's-ab12cd');
+  eq('with the game it belongs to', snap.members['7001'].game, 'friend-one/snake-dash');
+
+  /* just loading a page says nothing about a game, so it must not wipe it either */
+  await woken.touch('7001');
+  eq('a page load leaves it alone', (await woken.snapshot()).members['7001'].server, 's-ab12cd');
+
+  await woken.beat('7001', null, 'friend-one/snake-dash', '7001', 's-zz9988');
+  eq('moving to another server moves the row',
+    (await woken.snapshot()).members['7001'].server, 's-zz9988');
+  await woken.beat('7001', null, 'friend-one/snake-dash', '7001');
+  eq('a beat that names no server clears it',
+    (await woken.snapshot()).members['7001'].server, '');
+  await woken.beat('7001', null, 'friend-one/snake-dash', '7001', 's-zz9988');
+  await woken.beat('7001', null, null, '7001', 's-zz9988');
+  eq('and out of the game is out of its server',
+    (await woken.snapshot()).members['7001'].server, '');
+  await woken.beat('7001', null, 'friend-one/snake-dash', '7001', 's-zz9988');
+  await woken.leave('7001', null, '7001');
+  eq('leaving takes the whole row with it',
+    (await woken.snapshot()).members['7001'], undefined);
+
+  /* nothing that is not a public server id is ever kept */
+  const junk = ['ABCD', 's-AB12CD', 's-ab', 's-ab12cd!', '', null, 42, { id: 's-ab12cd' },
+    'x'.repeat(400)];
+  for (const bad of junk) {
+    await woken.beat('7002', null, 'friend-one/snake-dash', '7002', bad);
+    eq('refused as a server id: ' + JSON.stringify(bad).slice(0, 24),
+      (await woken.snapshot()).members['7002'].server, '');
+  }
+
+  /* a guest is counted, never named, so there is nobody to join */
+  await woken.beat(null, 'guest-token-1', 'friend-one/snake-dash', null, 's-ab12cd');
+  const guests = JSON.stringify(await woken.snapshot());
+  ok('a guest row never carries a server', guests.indexOf('s-ab12cd') < 0, guests);
+  const saved = JSON.stringify(await storage.get('live'));
+  ok('and nothing about a guest\'s server is stored either',
+    saved.indexOf('s-ab12cd') < 0, saved);
+
+  /* through the site: the beat route, the payload, and who is told */
+  const { env, store } = world();
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'snake-dash' }, cookie: mine });
+  await call(env, '/api/games/publish', { body: { repo: 'snake-dash' }, cookie: mine });
+  const beat = (body, cookie) => call(env, '/api/presence/beat', { body: body, cookie: cookie });
+
+  await beat({ game: 'friend-one/snake-dash', server: 's-ab12cd' }, mine);
+  let hub = await call(env, '/api/hub', { cookie: other });
+  let who = hub.body.members.find((m) => m.login === 'friend-one');
+  eq('a friend playing is shown playing', who.presence.state, 'playing');
+  eq('and the page is told which server, so Join can land in it',
+    who.presence.server, 's-ab12cd');
+
+  await beat({ game: 'friend-one/snake-dash', server: 'ABCD' }, mine);
+  hub = await call(env, '/api/hub', { cookie: other });
+  who = hub.body.members.find((m) => m.login === 'friend-one');
+  eq('a private server\'s code is refused at the door', who.presence.server, undefined);
+  ok('and is nowhere in the answer', hub.text.indexOf('ABCD') < 0);
+
+  await beat({ game: 'friend-one/snake-dash', server: 's-ab12cd' }, mine);
+  await beat({ game: 'friend-one/snake-dash' }, mine);
+  hub = await call(env, '/api/hub', { cookie: other });
+  eq('a beat without one clears it again',
+    hub.body.members.find((m) => m.login === 'friend-one').presence.server, undefined);
+
+  /* somebody who is in no game has no server to be in */
+  await beat({ game: 'friend-one/snake-dash', server: 's-ab12cd' }, mine);
+  await beat({ game: null }, mine);
+  hub = await call(env, '/api/hub', { cookie: other });
+  who = hub.body.members.find((m) => m.login === 'friend-one');
+  eq('leaving the game leaves its server', who.presence.state, 'online');
+  eq('with nothing left on the row', who.presence.server, undefined);
+
+  /* invisible means invisible: no state, no game, and no server */
+  await beat({ game: 'friend-one/snake-dash', server: 's-ab12cd' }, mine);
+  await call(env, '/api/me/presence', { body: { show: false }, cookie: mine });
+  await beat({ game: 'friend-one/snake-dash', server: 's-ab12cd' }, mine);
+  hub = await call(env, '/api/hub', { cookie: other });
+  who = hub.body.members.find((m) => m.login === 'friend-one');
+  eq('a hidden member is simply offline', who.presence.state, 'offline');
+  eq('and nobody is told where they are', who.presence.server, undefined);
+  ok('their server is nowhere in the payload at all',
+    hub.text.indexOf('s-ab12cd') < 0, hub.text.slice(0, 200));
+
+  /* and a signed-out player is a guest, with no row to carry anything */
+  const guestEnv = world();
+  const g1 = await joined('friend-one', guestEnv.env, guestEnv.store);
+  await call(guestEnv.env, '/api/games/add', { body: { repo: 'snake-dash' }, cookie: g1 });
+  await call(guestEnv.env, '/api/games/publish', { body: { repo: 'snake-dash' }, cookie: g1 });
+  await call(guestEnv.env, '/api/presence/beat', {
+    body: { game: 'friend-one/snake-dash', token: 'guest-token-9', server: 's-ab12cd' }
+  });
+  const guestHub = await call(guestEnv.env, '/api/hub');
+  ok('a signed-out player is counted and nothing else',
+    guestHub.text.indexOf('s-ab12cd') < 0 && guestHub.body.games
+      .find((g) => g.id === 'friend-one/snake-dash').active === 1,
+    guestHub.text.slice(0, 200));
+}
+
 /* ---------- 16. one document, no listing ---------- */
 
 async function testOneDocument() {
@@ -3163,7 +3529,8 @@ const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHu
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
   testDrafts, testCovers, testFavorites, testLoveMigration, testEditEveryField, testLongFields, testPresenceCore,
   testPlayTime, testPresenceRoutes, testRooms, testServers, testRoomLibrary,
-  testRoomRequest, testRoomRoutes, testServerList,
+  testRoomRequest, testRoomRoutes, testServerList, testGameKeyRule, testHubServerList,
+  testServerPresence,
   testOneDocument, testHeaders];
 
 (async () => {

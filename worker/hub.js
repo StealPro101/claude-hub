@@ -14,6 +14,7 @@ import {
 import { getState, update, noWrite, gameId as keyFor, listOf } from './state.js';
 import { makeGitHub, makeBudget, BudgetError } from './github.js';
 import { presenceClient } from './presence.js';
+import { isPublicId } from './rooms.js';
 import { nowIso, today, randomCode } from './util.js';
 
 export const DEFAULT_TOPIC = 'claude-hub-game';
@@ -679,10 +680,23 @@ export function publicGame(g, favs) {
   };
 }
 
+/*
+ * `server` is here so a press on Join beside somebody's name lands in THE SAME server
+ * they are in, and it is said only when all three are true: they are playing, they are
+ * not invisible (that is the line above - an invisible member is simply offline), and
+ * they are in a PUBLIC server. A private server never reaches presence at all, so there
+ * is nothing here to leave out; this only ever adds a public id, which is the same thing
+ * the game's own page would show anybody who looked at its list of servers.
+ */
 function presenceOf(member, snap, nowMs) {
   if (member.hidePresence) return { state: 'offline' };
   const row = snap.members[String(member.id)];
-  if (row) return { state: row.game ? 'playing' : 'online', game: row.game || null };
+  if (row && row.game) {
+    const out = { state: 'playing', game: row.game };
+    if (isPublicId(row.server)) out.server = row.server;
+    return out;
+  }
+  if (row) return { state: 'online', game: null };
   return { state: 'offline', lastSeen: member.lastSeen || null };
 }
 

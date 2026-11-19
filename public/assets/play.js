@@ -1,26 +1,40 @@
 /*
  * A game's page, in two states.
  *
- * 1. The details: picture, name, maker, one big Play button, the numbers, how to play.
+ * 1. The details: picture, name, maker, one big Play button, the numbers, how to play -
+ *    and, for a game that has players in it right now, its SERVERS, one row each with a
+ *    way straight into that one.
  * 2. In the game: Play takes over the whole window. Nothing of the site is left except
  *    one big round Leave button in the corner, over the game. Pressing it (or Escape)
  *    asks once - Leave or Keep playing - and the browser's Back button leaves too.
  *
  * The frame is never built from the query string: the id is looked up in the Hub's own
  * data and the address the server computed from owner + repo is used. Nothing loads
- * until Play is pressed, so a game with sound never starts on its own.
+ * until Play is pressed, so a game with sound never starts on its own. Joining one
+ * server rather than another adds one thing to that address: ?hubserver=<id>.
+ *
+ * While the game is open it may say which server it ended up in (room.js posts it to
+ * this page). That is worth exactly one thing: the heartbeat carries it, so a friend
+ * pressing Join beside this player's name lands in the same server. A message is read
+ * only if it really came from this game's own frame, and anything else is ignored
+ * without a word.
  */
 (function () {
   'use strict';
   var media = document.getElementById('media');
   var info = document.getElementById('info');
   var counts = document.getElementById('counts');
+  var servers = document.getElementById('servers');
   var about = document.getElementById('about');
   var lower = document.getElementById('lower');
   var lowerIn = document.getElementById('lowerIn');
   var layer = document.getElementById('ingame');
   var inGame = false;
   var leaveNow = null;
+  /* a server id is a thing the Hub made: "s-" and a few lower-case letters or numbers */
+  var SERVER_RE = /^s-[a-z0-9]{4,12}$/;
+  /* how often the list of servers is asked for again, while the page is being looked at */
+  var LIST_EVERY = 20000;
 
   var wanted = '';
   try {
@@ -35,12 +49,18 @@
    * game by itself - only a press on Join does.
    */
   var joinWanted = '';
+  var joinServer = '';
   try {
     joinWanted = sessionStorage.getItem('hubJoin') || '';
+    /* and which server of it they are in, so this lands in THEIRS */
+    joinServer = sessionStorage.getItem('hubJoinServer') || '';
     sessionStorage.removeItem('hubJoin');
+    sessionStorage.removeItem('hubJoinServer');
   } catch (e) {
     joinWanted = '';
+    joinServer = '';
   }
+  if (!SERVER_RE.test(joinServer)) joinServer = '';
 
   /* a reload or a shared link never drops anyone straight into a game */
   if (location.hash === '#play') {
@@ -53,9 +73,10 @@
 
   function nope(message) {
     document.title = 'Not here · Hub';
-    [media, info, counts, about].forEach(function (n) { Hub.clear(n); });
+    [media, info, counts, servers, about].forEach(function (n) { Hub.clear(n); });
     document.getElementById('gp').classList.add('off');
     counts.classList.add('off');
+    servers.classList.add('off');
     lower.classList.add('off');
     about.classList.add('gp-about--one');
     var box = Hub.box('Not on the Hub');
@@ -307,6 +328,109 @@
     }
     drawCounts(game);
 
+    /* ---- the servers, when there are any ----
+     *
+     * A game with nobody in it, and a game that is not multiplayer at all, has no
+     * servers - and then this page looks exactly as it always did: no heading, no empty
+     * list, nothing. The rows are the fullest first, which is where a player wants to
+     * be, and Join on a row goes into THAT server rather than wherever the game's own
+     * matchmaking would have put them.
+     */
+    var asking = false;
+    var listTimer = null;
+
+    function tidyServers(rows) {
+      var out = [];
+      for (var i = 0; rows && i < rows.length; i++) {
+        var r = rows[i] || {};
+        var players = Math.floor(Number(r.players));
+        var max = Math.floor(Number(r.max));
+        if (!SERVER_RE.test(String(r.id))) continue;
+        if (!isFinite(players) || players < 0) continue;
+        if (!isFinite(max) || max < 1 || max > 12) continue;
+        /* the Hub never lets a server past its max; drawing is not the place to argue */
+        out.push({ id: String(r.id), players: Math.min(players, max), max: max });
+      }
+      out.sort(function (a, b) {
+        return b.players - a.players || (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0));
+      });
+      return out;
+    }
+
+    function serverRow(row) {
+      var line = Hub.el('div', 'gp-sv-row');
+      var full = row.players >= row.max;
+      line.appendChild(Hub.el('span', 'gp-sv-n',
+        row.players + ' of ' + row.max + (row.max === 1 ? ' player' : ' players')));
+      /* one mark per place, filled for a player who is in it */
+      var meter = Hub.el('span', 'gp-sv-meter');
+      meter.setAttribute('aria-hidden', 'true');
+      for (var i = 0; i < row.max; i++) {
+        meter.appendChild(Hub.el('i', i < row.players ? 'on' : null));
+      }
+      line.appendChild(meter);
+      var join = Hub.el('button', 'join-btn', full ? 'Full' : 'Join');
+      join.type = 'button';
+      if (full) {
+        join.disabled = true;
+        join.setAttribute('aria-label', 'That server is full');
+      } else {
+        join.setAttribute('aria-label', 'Join the server with ' + row.players + ' of ' +
+          row.max + ' players');
+        join.addEventListener('click', function () { enter(row.id); });
+      }
+      line.appendChild(join);
+      return line;
+    }
+
+    function drawServers(rows) {
+      Hub.clear(servers);
+      if (!rows.length) {
+        servers.classList.add('off');
+        return;
+      }
+      servers.classList.remove('off');
+      var head = Hub.el('div', 'gp-sv-head');
+      var h2 = Hub.el('h2', '', 'Servers');
+      h2.id = 'gpServersHead';
+      head.appendChild(h2);
+      head.appendChild(Hub.el('span', 'gp-sv-sub',
+        rows.length === 1 ? '1 server up' : rows.length + ' servers up'));
+      var again = Hub.el('button', 'btn btn--grey btn--sm gp-sv-again');
+      again.type = 'button';
+      again.appendChild(Hub.el('span', '', 'Refresh'));
+      again.addEventListener('click', function () { refreshServers(); });
+      head.appendChild(again);
+      servers.appendChild(head);
+      servers.setAttribute('aria-labelledby', 'gpServersHead');
+      var list = Hub.el('div', 'gp-sv-rows');
+      for (var i = 0; i < rows.length; i++) list.appendChild(serverRow(rows[i]));
+      servers.appendChild(list);
+    }
+
+    function refreshServers() {
+      if (asking) return Promise.resolve();
+      asking = true;
+      return fetch('/api/rooms/servers?g=' + encodeURIComponent(game.id), {
+        credentials: 'same-origin', cache: 'no-store'
+      }).then(function (res) {
+        return res && res.ok ? res.json() : null;
+      }).then(function (body) {
+        asking = false;
+        drawServers(tidyServers(body && body.ok ? body.servers : []));
+      }).catch(function () {
+        asking = false;
+        /* a list that cannot be fetched leaves the one in front of the player alone */
+      });
+    }
+
+    refreshServers();
+    listTimer = setInterval(function () {
+      /* not while they are in the game (the page is behind it) and not in a tab nobody
+         is looking at - a hidden tab's timers are throttled to nothing anyway */
+      if (!inGame && document.visibilityState === 'visible') refreshServers();
+    }, LIST_EVERY);
+
     /* ---- how to play / notes ---- */
     Hub.clear(about);
     var howto = (game.howto || '').trim();
@@ -396,9 +520,33 @@
       }
     }
 
-    function enter() {
+    /*
+     * The address the frame is given: the game's own, plus ?hubserver=<id> when the
+     * player picked a server. Whatever query the play address already carries is kept,
+     * and the hash is left exactly where it was - a game may well be using it.
+     */
+    function frameSrc(serverId) {
+      if (!serverId) return url;
+      var at = url.indexOf('#');
+      var body = at < 0 ? url : url.slice(0, at);
+      var hash = at < 0 ? '' : url.slice(at);
+      body += (body.indexOf('?') < 0 ? '?' : '&') + 'hubserver=' + encodeURIComponent(serverId);
+      return body + hash;
+    }
+
+    /* which server the game inside the frame says it is in, '' for none or a private one */
+    var atServer = '';
+    var frameOrigin = '';
+    try {
+      frameOrigin = new URL(url, location.href).origin;
+    } catch (e) {
+      frameOrigin = '';
+    }
+
+    function enter(serverId) {
       if (inGame) return;
       inGame = true;
+      atServer = '';
       askLeave(false);
       var frame = document.createElement('iframe');
       frame.title = title;
@@ -406,7 +554,7 @@
         'allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-popups');
       frame.setAttribute('allow', 'fullscreen; gamepad');
       frame.setAttribute('referrerpolicy', 'no-referrer');
-      frame.src = url;
+      frame.src = frameSrc(serverId);
       Hub.clear(host);
       host.appendChild(frame);
       layer.classList.remove('off');
@@ -420,8 +568,13 @@
       /* signed out, "recently played" and "your time" are this browser's own business */
       if (!me) Hub.noteRecent(game.id);
       countHere(true);
-      /* say where we are first, then count the visit */
-      beat.where(game.id)
+      /*
+       * Say where we are first, then count the visit. NOT which server: the one that
+       * was asked for is only a wish until the game has connected, and it may well be
+       * given another one. What the game itself says, below, is the only thing this
+       * page ever passes on.
+       */
+      beat.where(game.id, '')
         .then(function () { return Hub.post('/api/presence/visit', { game: game.id }); })
         .catch(function () { /* the counts are not worth a fuss */ });
     }
@@ -429,6 +582,7 @@
     function out() {
       if (!inGame) return;
       inGame = false;
+      atServer = '';
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(function () { /* already out */ });
       }
@@ -438,7 +592,9 @@
       askLeave(false);
       play.focus();
       countHere(false);
-      beat.where(null)
+      /* out of the game is out of its server too */
+      beat.where(null, '')
+        .then(function () { return refreshServers(); })
         .then(function () { return Hub.data(true); })
         .then(function (fresh) {
           var g2 = (fresh.games || []).find(function (x) { return x.id === game.id; });
@@ -460,7 +616,38 @@
       else out();
     };
 
-    play.addEventListener('click', enter);
+    /* the big button is "put me in a server", not "that one" */
+    play.addEventListener('click', function () { enter(''); });
+
+    /*
+     * WHICH SERVER THE GAME ENDED UP IN, from the game itself.
+     *
+     * Accepted only from this game's own frame: the window the message came from has to
+     * be the frame's window AND its origin has to be the origin of the play address.
+     * Then the shape is checked - a server id or nothing, small whole numbers - and
+     * anything that does not fit is dropped without a word. All it is ever used for is
+     * the heartbeat, so a friend's Join can land in the same server.
+     */
+    function smallCount(n) {
+      return typeof n === 'number' && isFinite(n) && n >= 0 && n <= 12 && n === Math.floor(n);
+    }
+
+    window.addEventListener('message', function (ev) {
+      if (!inGame || !frameOrigin || ev.origin !== frameOrigin) return;
+      var frame = host.firstChild;
+      if (!frame || !frame.contentWindow || ev.source !== frame.contentWindow) return;
+      var d = ev.data;
+      if (!d || typeof d !== 'object' || d.hubRoom !== 1) return;
+      if (typeof d.server !== 'string') return;
+      if (d.server !== '' && !SERVER_RE.test(d.server)) return;
+      if (typeof d.private !== 'boolean') return;
+      if (!smallCount(d.players) || !smallCount(d.max)) return;
+      /* a private server has no id to pass on, and says so itself */
+      var id = d.private ? '' : d.server;
+      if (id === atServer) return;
+      atServer = id;
+      beat.where(game.id, id).catch(function () { /* counts are never worth a fuss */ });
+    });
     /* the round button opens the question, and closes it again if it is already open */
     leave.addEventListener('click', function () {
       askLeave(ask.classList.contains('off'));
@@ -485,10 +672,17 @@
       countHere(inGame && document.visibilityState === 'visible');
     });
     /* closing the tab mid-game: the last stretch is kept before the page goes */
-    window.addEventListener('pagehide', function () { countHere(false); });
+    window.addEventListener('pagehide', function () {
+      countHere(false);
+      if (listTimer) {
+        clearInterval(listTimer);
+        listTimer = null;
+      }
+    });
 
-    /* joined from somebody's card: straight in, now that everything is wired */
-    if (joinWanted && joinWanted === game.id) enter();
+    /* Joined from somebody's card: straight in, now that everything is wired - and into
+       the server they are in, when the Hub said which one. */
+    if (joinWanted && joinWanted === game.id) enter(joinServer);
   }
 
   function tinted(title, text) {

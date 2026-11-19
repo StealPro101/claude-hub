@@ -101,7 +101,7 @@
     /* in a game right now, and not me: a way straight in beside the line */
     var inGame = Hub.joinableGame(m, published());
     if (inGame && !isMe) {
-      var join = Hub.joinButton(inGame.id);
+      var join = Hub.joinButton(inGame.id, null, Hub.joinableServer(m));
       join.setAttribute('aria-label', 'Join ' + (m.name || m.login) +
         ' in ' + (inGame.title || 'their game'));
       pres.appendChild(join);
