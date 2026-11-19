@@ -173,18 +173,28 @@ export function devRoomsBinding(presence, storage) {
     async fetch(url, init) {
       const headers = new Headers((init && init.headers) || (url && url.headers) || {});
       const href = typeof url === 'string' ? url : url.url;
+      const u = new URL(href);
       if ((headers.get('Upgrade') || '').toLowerCase() === 'websocket' && waiting.raw) {
-        const u = new URL(href);
         const raw = waiting.raw;
         const key = waiting.key;
         waiting.raw = null;
         waiting.taken = true;
         await rooms.open(raw, key, {
+          game: u.searchParams.get('game') || '',
+          way: u.searchParams.get('want') || '',
           room: u.searchParams.get('room') || '',
+          max: u.searchParams.get('max') || '',
+          strict: u.searchParams.get('only') === '1',
           pid: u.searchParams.get('pid') || '',
           name: u.searchParams.get('name') || ''
         });
         return new Response('upgraded', { status: 200 });
+      }
+      /* the server list, the same way the real object answers it */
+      if (u.pathname === '/servers') {
+        return new Response(JSON.stringify({
+          ok: true, servers: rooms.core.serverList(u.searchParams.get('game') || '')
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       return presence.get('hub').fetch(url, init);
     }

@@ -5,11 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Room check</title>
 <meta name="robots" content="noindex">
-<meta name="description" content="Two browsers, one room code: a plain check that the Hub's rooms relay works.">
+<meta name="description" content="Two browsers, three ways in: a plain check that the Hub's game servers work.">
 <!--
   A connection check, not a game. It is not on the Hub and nothing links to it: open it
-  in two tabs (or on two devices), put the same code in both, and watch them see each
-  other. Everything it does, a real game does the same way.
+  in two or three tabs (or on two devices) and press the buttons.
+
+  Play public   put me in a public server with space, or a new one (nothing typed)
+  Host private  open a private server and show its code
+  Join by code  a private server by the code in the box
+  Servers       the game's public servers, with a Join button on each row
 
   It loads the library from the Hub - or from this computer's own Hub when the page is
   opened from localhost. To point it somewhere else:  ?hub=http://127.0.0.1:8797
@@ -38,20 +42,27 @@ input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8
   background:var(--bg);color:var(--ink);min-width:0}
 input#code{width:9ch;text-transform:uppercase;letter-spacing:.14em;font-weight:700}
 input#name{width:14ch}
+input#max{width:6ch;text-align:center;font-weight:700}
 input#line{flex:1 1 14ch}
 button{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px;
   background:var(--ink);color:var(--card);cursor:pointer}
 button.quiet{background:transparent;color:var(--ink)}
+button.small{padding:4px 9px;font-size:13px}
 button[disabled]{opacity:.45;cursor:default}
 .state{font-size:13px;color:var(--soft)}
 .state b{color:var(--ink)}
 .state.on b{color:var(--ok)}
 .state.off b{color:var(--bad)}
+.where{font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--soft);margin:6px 0 0}
+.where b{color:var(--ink)}
 ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 li{display:flex;gap:8px;align-items:baseline;font-size:14px}
 li .tag{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;
   color:var(--soft)}
 li.me .who{color:var(--me);font-weight:700}
+#servers li{align-items:center}
+#servers .id{font:12px/1.5 ui-monospace,Consolas,monospace}
+#servers .grow{flex:1 1 auto}
 #log{margin:0;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;
   max-height:40vh;overflow:auto;color:var(--ink)}
 #log div{border-top:1px dotted var(--line);padding:2px 0}
@@ -67,8 +78,9 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
 <div class="wrap">
   <div>
     <h1>Room check</h1>
-    <p class="sub">Open this page twice, put the same code in both, press Join. If each
-      one lists the other, the Hub's rooms work.</p>
+    <p class="sub">Open this page two or three times. Press <b>Play public</b> in all of
+      them with a small max and watch them split into servers, or host a private one and
+      type its code in the others.</p>
   </div>
 
   <div class="card">
@@ -78,8 +90,24 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
         <input id="name" maxlength="24" value="Tab A" autocomplete="off">
       </div>
       <div>
-        <label for="code">Room code</label>
+        <label for="max">Max</label>
+        <input id="max" maxlength="2" value="2" inputmode="numeric" autocomplete="off">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="play" type="button">Play public</button>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="hostOne" type="button">Host private</button>
+      </div>
+      <div>
+        <label for="code">Code</label>
         <input id="code" maxlength="12" autocomplete="off" spellcheck="false">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="go" type="button">Join by code</button>
       </div>
       <div>
         <label>&nbsp;</label>
@@ -87,19 +115,16 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
       </div>
       <div>
         <label>&nbsp;</label>
-        <button id="go" type="button">Join</button>
-      </div>
-      <div>
-        <label>&nbsp;</label>
         <button id="stop" class="quiet" type="button" disabled>Leave</button>
       </div>
     </div>
     <p class="state off" id="state">Not joined. <b>&mdash;</b></p>
+    <p class="where" id="where">no server</p>
   </div>
 
   <div class="grid2">
     <div class="card">
-      <h2>In this room</h2>
+      <h2>In this server</h2>
       <ul id="players"><li class="t">nobody yet</li></ul>
     </div>
     <div class="card">
@@ -109,6 +134,14 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
         <button id="pingBtn" type="button" disabled>Ping</button>
         <button id="autoBtn" class="quiet" type="button" disabled>Ping every 2s</button>
       </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Servers</h2>
+    <ul id="servers"><li class="t">press Refresh</li></ul>
+    <div class="row" style="margin-top:8px">
+      <button id="refresh" class="quiet" type="button">Refresh</button>
     </div>
   </div>
 
@@ -159,6 +192,7 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
   var watch = null;
   var wasOn = false;
   var sentAt = {};
+  var lastList = [];
 
   function stamp() {
     var d = new Date();
@@ -185,9 +219,32 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
     p.textContent = '';
     p.appendChild(document.createTextNode(text + ' '));
     var b = document.createElement('b');
-    b.textContent = room && room.connected ? (room.isHost ? 'you are the host' : 'in the room')
+    b.textContent = room && room.connected ? (room.isHost ? 'you are the host' : 'in the server')
       : '—';
     p.appendChild(b);
+    where();
+  }
+
+  /* which server this tab is in, how full it is, and whether it is private */
+  function where() {
+    var p = el('where');
+    p.textContent = '';
+    if (!room || !room.server) {
+      p.textContent = 'no server';
+      return;
+    }
+    var id = document.createElement('b');
+    id.textContent = room.server;
+    p.appendChild(id);
+    var how = (room.isPrivate ? ' private ' : ' public ') +
+      (room.players ? room.players.length : 0) + ' of ' + (room.max || '?');
+    p.appendChild(document.createTextNode(how));
+    if (room.isPrivate && room.code) {
+      p.appendChild(document.createTextNode(' - friends type '));
+      var c = document.createElement('b');
+      c.textContent = room.code;
+      p.appendChild(c);
+    }
   }
 
   function drawPlayers() {
@@ -199,6 +256,7 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
       none.className = 't';
       none.textContent = 'nobody yet';
       ul.appendChild(none);
+      where();
       return;
     }
     for (var i = 0; i < list.length; i++) {
@@ -226,9 +284,12 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
       li.appendChild(id);
       ul.appendChild(li);
     }
+    where();
   }
 
   function buttons(on) {
+    el('play').disabled = on;
+    el('hostOne').disabled = on;
     el('go').disabled = on;
     el('stop').disabled = !on;
     el('send').disabled = !on;
@@ -237,6 +298,61 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
     el('autoBtn').disabled = !on;
     el('code').disabled = on;
     el('name').disabled = on;
+    el('max').disabled = on;
+    drawServers(lastList);
+  }
+
+  function drawServers(list) {
+    lastList = list || [];
+    var ul = el('servers');
+    ul.textContent = '';
+    if (!lastList.length) {
+      var none = document.createElement('li');
+      none.className = 't';
+      none.textContent = 'no public servers right now';
+      ul.appendChild(none);
+      return;
+    }
+    for (var i = 0; i < lastList.length; i++) {
+      (function (row) {
+        var li = document.createElement('li');
+        var id = document.createElement('span');
+        id.className = 'id';
+        id.textContent = row.id;
+        li.appendChild(id);
+        var how = document.createElement('span');
+        how.className = 'grow t';
+        how.textContent = row.players + ' of ' + row.max;
+        li.appendChild(how);
+        if (room && room.server === row.id) {
+          var hereTag = document.createElement('span');
+          hereTag.className = 'tag';
+          hereTag.textContent = 'you are here';
+          li.appendChild(hereTag);
+        }
+        var btn = document.createElement('button');
+        btn.className = 'quiet small';
+        btn.type = 'button';
+        btn.textContent = 'Join';
+        btn.disabled = Boolean(room && room.connected);
+        btn.addEventListener('click', function () {
+          start('server', row.id);
+        });
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }(lastList[i]));
+    }
+  }
+
+  function refresh() {
+    if (!window.HubRoom) {
+      log('the library is not loaded yet');
+      return;
+    }
+    window.HubRoom.servers(function (list) {
+      drawServers(list);
+      log('servers: ' + list.length + ' public');
+    });
   }
 
   function others() {
@@ -265,25 +381,36 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
     el('autoBtn').textContent = 'Ping every 2s';
   }
 
-  el('fresh').addEventListener('click', function () {
-    el('code').value = window.HubRoom ? window.HubRoom.newCode() : '';
-  });
+  function maxAsked() {
+    var n = Math.floor(Number(el('max').value));
+    return isFinite(n) && n > 0 ? n : 12;
+  }
 
-  el('go').addEventListener('click', function () {
+  /* The three ways in, and Join on a server row, all end up here. */
+  function start(way, pick) {
     if (!window.HubRoom) {
       log('the library is not loaded yet');
       return;
     }
-    var code = el('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (code.length < 3) {
-      log('a code is 3 to 12 letters or numbers');
-      return;
+    var opts = { name: el('name').value, max: maxAsked() };
+    if (way === 'code') {
+      var code = el('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (code.length < 3) {
+        log('a code is 3 to 12 letters or numbers');
+        return;
+      }
+      el('code').value = code;
+      opts.code = code;
     }
-    el('code').value = code;
+    if (way === 'server') opts.server = pick;
     buttons(true);
     state('Connecting...');
-    log('joining ' + code + ' as ' + el('name').value + ' (hub ' + window.HubRoom.hub + ')');
-    room = window.HubRoom.join({ code: code, name: el('name').value });
+    log(way === 'code' ? 'joining ' + opts.code
+      : (way === 'new' ? 'opening a private server'
+        : (way === 'server' ? 'joining ' + pick : 'looking for a public server')) +
+        ' (max ' + opts.max + ')');
+    room = way === 'code' ? window.HubRoom.join(opts)
+      : (way === 'new' ? window.HubRoom.host(opts) : window.HubRoom.play(opts));
 
     /* a dropped connection is not a close: the library comes back by itself, and a
        game should say so while it is away (room.connected) */
@@ -301,8 +428,11 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
       wasOn = true;
       state('Joined.', 'on');
       drawPlayers();
-      log('in the room. you are ' + info.me + ', host is ' + info.host +
-        ', ' + info.players.length + ' here');
+      /* the list in front of the player is a snapshot; this one is now out of date */
+      refresh();
+      log('in server ' + room.server + (room.isPrivate ? ' (private, code ' + room.code + ')'
+        : ' (public)') + ', max ' + room.max + '. you are ' + info.me +
+        ', host is ' + info.host + ', ' + info.players.length + ' here');
     });
     room.on('join', function (p) {
       drawPlayers();
@@ -346,9 +476,24 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
       }
       state('Closed (' + why + ').', 'off');
       drawPlayers();
+      refresh();
       log('closed: ' + why);
     });
+  }
+
+  el('fresh').addEventListener('click', function () {
+    el('code').value = window.HubRoom ? window.HubRoom.newCode() : '';
   });
+  el('play').addEventListener('click', function () {
+    start('any');
+  });
+  el('hostOne').addEventListener('click', function () {
+    start('new');
+  });
+  el('go').addEventListener('click', function () {
+    start('code');
+  });
+  el('refresh').addEventListener('click', refresh);
 
   el('stop').addEventListener('click', function () {
     if (room) room.leave();
@@ -391,15 +536,14 @@ h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
     ping();
   });
 
-  /* a code in the address, so a second tab can be opened on the same room */
+  /* a code in the address, so a second tab can be opened on the same private server */
   var fromUrl = /[?&]code=([A-Za-z0-9]{3,12})/.exec(location.search);
   el('code').value = fromUrl ? fromUrl[1].toUpperCase() : '';
   el('name').value = 'Tab ' + String.fromCharCode(65 + Math.floor(Math.random() * 26));
-  if (!el('code').value) {
-    window.addEventListener('load', function () {
-      if (!el('code').value && window.HubRoom) el('code').value = window.HubRoom.newCode();
-    });
-  }
+  window.addEventListener('load', function () {
+    if (!el('code').value && window.HubRoom) el('code').value = window.HubRoom.newCode();
+    refresh();
+  });
 }());
 </script>
 </body>

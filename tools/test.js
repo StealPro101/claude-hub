@@ -18,7 +18,8 @@ import { getState, update, listOf } from '../worker/state.js';
 import { PresenceCore } from '../worker/presence.js';
 import { fakePresence, fakeStorage, fakeSocket, fakeRoomState } from './fake-presence.js';
 import {
-  RoomsCore, roomRequest, MAX_PLAYERS, MAX_SOCKETS, MAX_MSG, RATE_BURST, RATE_DROPS, DAILY_MSGS
+  RoomsCore, roomRequest, serversRequest, gameOfRoom, gameKeyOf, publicKeyOf, isPublicId,
+  clampMax, MAX_PLAYERS, MAX_SOCKETS, MAX_MSG, MAX_LIST, RATE_BURST, RATE_DROPS, DAILY_MSGS
 } from '../worker/rooms.js';
 import {
   clean, pretty, isLogin, isRepoName, playUrl, normalizeHubJson, repoEligible, hasTopic,
@@ -2011,9 +2012,13 @@ async function testPresenceRoutes() {
 
 const ROOM_A = 'friend-one/space-dodge/ABCD';
 
+/* A private server by its code: the oldest way in, and still the simplest one to
+   drive from a test. The game comes from the room key, exactly as the Worker sends it. */
 function roomJoin(core, label, room, pid, name) {
   const ws = fakeSocket(label);
-  return core.connect(ws, { room: room, pid: pid, name: name }).then(() => ws);
+  return core.connect(ws, {
+    game: gameOfRoom(room), way: 'code', room: room, pid: pid, name: name
+  }).then(() => ws);
 }
 
 async function testRooms() {
@@ -2228,11 +2233,14 @@ async function testRooms() {
   const sleepSeats = fakeRoomState();
   const wake = () => new RoomsCore(sleepSeats.ops(sleepDisk, () => now));
   const room = 'friend-one/sleepy/ZZZZ';
+  const sleeper = (ws, pid, name) => wake().connect(ws, {
+    game: gameOfRoom(room), way: 'code', room: room, pid: pid, name: name
+  });
   const one2 = fakeSocket('one');
-  await wake().connect(one2, { room: room, pid: 'sleep-one', name: 'One' });
+  await sleeper(one2, 'sleep-one', 'One');
   now += 30000;
   const two2 = fakeSocket('two');
-  await wake().connect(two2, { room: room, pid: 'sleep-two', name: 'Two' });
+  await sleeper(two2, 'sleep-two', 'Two');
   eq('a woken object finds the player who was already there',
     two2.last().players.map((p) => p.id).join(','), 'sleep-one,sleep-two');
   eq('and knows whose room it is', two2.last().host, 'sleep-one');
@@ -2243,7 +2251,7 @@ async function testRooms() {
   eq('from the right player', two2.last().from, 'sleep-one');
   now += 30000;
   const three = fakeSocket('three');
-  await wake().connect(three, { room: room, pid: 'sleep-three', name: 'Three' });
+  await sleeper(three, 'sleep-three', 'Three');
   now += 30000;
   one2.readyState = 3;
   await wake().close(one2);
@@ -2254,7 +2262,7 @@ async function testRooms() {
   eq('the third player hears the same', three.last().id, 'sleep-two');
   now += 30000;
   const back = fakeSocket('two-again');
-  await wake().connect(back, { room: room, pid: 'sleep-two', name: 'Two' });
+  await sleeper(back, 'sleep-two', 'Two');
   eq('a woken object replaces a returning player', two2.last().why, 'replaced');
   eq('and the room is still theirs', back.last().host, 'sleep-two');
   eq('with nobody told they left', three.last().id, 'sleep-two');
@@ -2319,9 +2327,530 @@ async function testRoomRequest() {
     bad('?g=x&code=ABCD&pid=pid-abc123&name=' + encodeURIComponent('A\u0000n\nn ')).name, 'A n n');
   eq('a very long name is cut to 24',
     bad('?g=x&code=ABCD&pid=pid-abc123&name=' + 'N'.repeat(40)).name.length, 24);
+
+  /* ---- the three ways in, as the Worker reads them off the address ---- */
+  const asked = (q) => roomRequest(url(q), 'https://friend-one.github.io', logins);
+  const auto = asked('?g=space-dodge&want=any&max=3&pid=pid-abc123');
+  eq('no code at all is a public, automatic join', auto.way, 'any');
+  eq('with no server to go to yet', auto.room, '');
+  eq('the game it belongs to', auto.gameKey, 'friend-one/space-dodge');
+  eq('and the max it asked for', auto.max, 3);
+  eq('a max of 99 is clamped, not refused',
+    asked('?g=x&want=any&max=99&pid=pid-abc123').max, 12);
+  eq('so is a max of nothing', asked('?g=x&want=any&max=0&pid=pid-abc123').max, 1);
+  eq('and a missing one is twelve', asked('?g=x&want=any&pid=pid-abc123').max, 12);
+  eq('a public server can be asked for by id',
+    asked('?g=x&want=server&server=s-ab12cd&pid=pid-abc123').room, 'friend-one/x/s-ab12cd');
+  eq('only one server is not the same as any one',
+    asked('?g=x&want=server&server=s-ab12cd&only=1&pid=pid-abc123').strict, true);
+  eq('and by default it is not', asked('?g=x&want=server&server=s-ab12cd&pid=pid-abc123')
+    .strict, false);
+  eq('a new private server needs nothing but the word',
+    asked('?g=x&want=new&pid=pid-abc123').way, 'new');
+  eq('with no room decided here', asked('?g=x&want=new&pid=pid-abc123').room, '');
+  eq('a way in nobody has heard of is refused',
+    asked('?g=x&want=sideways&pid=pid-abc123').status, 400);
+  eq('a code AND a public server is refused',
+    asked('?g=x&want=any&code=ABCD&pid=pid-abc123').status, 400);
+  eq('a public server id is not a code a player may type',
+    asked('?g=x&code=s-ab12cd&pid=pid-abc123').status, 400);
+  eq('and a code is not a public server id',
+    asked('?g=x&want=server&server=ABCD&pid=pid-abc123').status, 400);
+  eq('nor is a capitalised one',
+    asked('?g=x&want=server&server=S-AB12CD&pid=pid-abc123').status, 400);
+  eq('nor a short one', asked('?g=x&want=server&server=s-ab&pid=pid-abc123').status, 400);
+  eq('a public join still needs a game',
+    roomRequest(url('?want=any&pid=pid-abc123'), 'https://friend-one.github.io', logins)
+      .status, 400);
+  eq('and a player id', asked('?g=x&want=any').status, 400);
+
+  /* ---- the list request ---- */
+  const listUrl = (q) => new URL('https://hub.test/room/servers' + q);
+  eq('a member\'s game may ask for its own servers',
+    serversRequest(listUrl('?g=space-dodge'), 'https://friend-one.github.io', logins).gameKey,
+    'friend-one/space-dodge');
+  eq('the login comes from the origin, so a game can only ever ask for its own',
+    serversRequest(listUrl('?g=space-dodge'), 'https://stealpro101.github.io', logins).gameKey,
+    'stealpro101/space-dodge');
+  eq('another website may not ask',
+    serversRequest(listUrl('?g=x'), 'https://evil.example.com', logins).status, 403);
+  eq('nor somebody who is not a member',
+    serversRequest(listUrl('?g=x'), 'https://stranger.github.io', logins).status, 403);
+  eq('nor a request with no Origin', serversRequest(listUrl('?g=x'), null, logins).status, 403);
+  eq('a game being tested on this computer may',
+    serversRequest(listUrl('?g=x'), 'http://127.0.0.1:8797', logins).gameKey, 'local/x');
+  eq('and a bad game name is refused',
+    serversRequest(listUrl('?g=a/b'), 'https://friend-one.github.io', logins).status, 400);
 }
 
-/* ---------- 15e. rooms through the site ---------- */
+/* ---------- 15e. servers: automatic, picked and private ---------- */
+
+/* the shape the object gives a public server, and nothing a player could ever type */
+const PUB_RE = /^s-[a-z0-9]{4,12}$/;
+/* a private code: no I and no O, so nothing looks like something else */
+const CODE_RE4 = /^[ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/;
+
+async function testServers() {
+  console.log('rooms: servers');
+  let now = Date.UTC(2026, 10, 18, 2, 0, 0);
+  const disk = fakeStorage();
+  const seats = fakeRoomState();
+  /*
+   * THE SLEEP RULE, THROUGH THE WHOLE STORY BELOW. Every single call in this group is
+   * made on a BRAND NEW core that has never seen these sockets - which is what every
+   * handler gets on a quiet evening. So which servers exist, who is in them, each one's
+   * max and whether it is public or private can only have come back from the socket
+   * tags and the attachments.
+   */
+  const wake = () => new RoomsCore(seats.ops(disk, () => now));
+  const GAME = gameKeyOf('friend-one', 'space-dodge');
+  const OTHER = gameKeyOf('friend-two', 'space-dodge');
+  let seq = 0;
+
+  /* one player arriving, whichever way in. The Worker would have cleaned all of this. */
+  async function enter(way, opts, where) {
+    const o = opts || {};
+    const seats2 = where || seats;
+    seq++;
+    const ws = fakeSocket(o.label || ('ws' + seq));
+    const game = o.game || GAME;
+    const params = {
+      game: game, way: way, pid: o.pid || ('player-' + seq), name: o.name || ('P' + seq)
+    };
+    if (o.max !== undefined) params.max = o.max;
+    if (o.strict) params.strict = true;
+    if (way === 'server') params.room = game + '/' + o.id;
+    if (way === 'code') params.room = game + '/' + String(o.code).toUpperCase();
+    now += 10;
+    const core = seats2 === seats ? wake() : new RoomsCore(seats2.ops(fakeStorage(), () => now));
+    const res = await core.connect(ws, params);
+    return { ws: ws, res: res, hello: ws.last(), pid: params.pid };
+  }
+  const list = (game) => wake().serverList(game || GAME);
+
+  /* ---- nobody types anything ---- */
+  const first = await enter('any', { max: 3, name: 'Ann' });
+  ok('a player who just presses Play gets a public server',
+    PUB_RE.test(first.hello.server), first.hello.server);
+  eq('and is told it is not a private one', first.hello.private, false);
+  eq('with the max the game asked for', first.hello.max, 3);
+  eq('a public server has no code to read out', first.hello.code, '');
+  eq('whoever opened it is its host', first.hello.host, first.hello.you);
+  eq('and it is in the list with one player in it',
+    JSON.stringify(list()),
+    JSON.stringify([{ id: first.hello.server, players: 1, max: 3 }]));
+
+  /* ---- a max out of range is clamped, never refused ---- */
+  const wide = await enter('any', { max: 99, game: gameKeyOf('friend-one', 'clamp-a') });
+  eq('a game asking for 99 players gets 12', wide.hello.max, 12);
+  const nobody = await enter('any', { max: 0, game: gameKeyOf('friend-one', 'clamp-b') });
+  eq('one asking for none gets one', nobody.hello.max, 1);
+  const silly = await enter('any', { max: 'lots', game: gameKeyOf('friend-one', 'clamp-c') });
+  eq('and nonsense gets the full twelve', silly.hello.max, 12);
+  eq('the Worker clamps it exactly the same way',
+    [clampMax('lots'), clampMax(99), clampMax(-4), clampMax(3)].join(','), '12,12,1,3');
+
+  /* ---- the next players fill the server that is already there ---- */
+  const second = await enter('any', { max: 3, name: 'Bo' });
+  eq('the next player joins the one with space', second.hello.server, first.hello.server);
+  eq('and is not the host', second.hello.host, first.hello.you);
+  eq('the player who was there heard about it',
+    first.ws.last().t + ':' + first.ws.last().name, 'join:Bo');
+  const third = await enter('any', { max: 12, name: 'Cy' });
+  eq('a later joiner asking for a bigger max does not get one', third.hello.max, 3);
+  eq('they are in the same server all the same', third.hello.server, first.hello.server);
+
+  /* ---- and a full server sends the next one to a NEW server ---- */
+  const fourth = await enter('any', { max: 3, name: 'Di' });
+  ok('the fourth player of a 3-player game is somewhere else',
+    fourth.hello.server !== first.hello.server, fourth.hello.server);
+  ok('in a public server of their own', PUB_RE.test(fourth.hello.server));
+  eq('on their own in it', fourth.hello.players.length, 1);
+  eq('with the max they asked for', fourth.hello.max, 3);
+  eq('so the game now has two servers', list().length, 2);
+  eq('the fullest first', list()[0].id, first.hello.server);
+  eq('and the counts are right',
+    list().map((s) => s.players + ' of ' + s.max).join(', '), '3 of 3, 1 of 3');
+
+  /* ---- matchmaking takes the fullest one that still has space ---- */
+  const named = await enter('server', { id: 's-zzzz11', max: 4, strict: true });
+  eq('a public server asked for by name that is not there opens under that id',
+    named.hello.server, 's-zzzz11');
+  const filler = await enter('server', { id: 's-zzzz11', max: 9, strict: true });
+  eq('and a joiner cannot talk it into a bigger max', filler.hello.max, 4);
+  const picked = await enter('any', { max: 3 });
+  eq('automatic matchmaking fills the fullest server with space',
+    picked.hello.server, 's-zzzz11');
+
+  /* ---- a server that empties is simply gone ---- */
+  const lonely = await enter('server', { id: 's-empty9', max: 2, strict: true });
+  ok('a server is in the list while somebody is in it',
+    list().some((s) => s.id === 's-empty9'));
+  lonely.ws.readyState = 3;
+  await wake().close(lonely.ws);
+  ok('and gone from it the moment the last player leaves',
+    !list().some((s) => s.id === 's-empty9'));
+  eq('with nothing left behind to tidy up', list().length, 3);
+
+  /* ---- asked for by name: honoured, fallen through, or refused ---- */
+  const toSecond = await enter('server', { id: fourth.hello.server, max: 3 });
+  eq('a public server with space is the one you get',
+    toSecond.hello.server, fourth.hello.server);
+  eq('and nothing is said about falling through', toSecond.hello.fell, undefined);
+  const toFull = await enter('server', { id: first.hello.server, max: 3 });
+  ok('a full one hands the player to matchmaking instead',
+    toFull.hello.server !== first.hello.server, toFull.hello.server);
+  eq('and the hello says so, so a game can tell the player', toFull.hello.fell, true);
+  const strictFull = await enter('server', { id: first.hello.server, strict: true });
+  eq('with "that one or nothing" a full server is a refusal',
+    strictFull.hello.t + ':' + strictFull.hello.why, 'bye:full');
+  eq('and the socket is closed', strictFull.ws.readyState, 3);
+
+  /* ---- two games never share a server ---- */
+  const mine = await enter('server', { id: 's-share1', max: 2, strict: true });
+  const theirs = await enter('server', { id: 's-share1', max: 2, strict: true, game: OTHER });
+  eq('the same id in another member\'s game is another server',
+    theirs.hello.players.length, 1);
+  eq('with its own single player', mine.hello.players.length, 1);
+  eq('and each game lists only its own',
+    JSON.stringify(list(OTHER)), JSON.stringify([{ id: 's-share1', players: 1, max: 2 }]));
+  ok('neither of them is missing', list().some((s) => s.id === 's-share1'));
+  eq('a game nobody is playing has an empty list',
+    JSON.stringify(list(gameKeyOf('friend-one', 'nothing-here'))), '[]');
+
+  /* ---- private servers: never listed, never matched into ---- */
+  const privy = await enter('new', { max: 2, name: 'Pat' });
+  ok('host() comes back with a code a friend can read out',
+    CODE_RE4.test(privy.hello.code), privy.hello.code);
+  eq('which is also its id', privy.hello.server, privy.hello.code);
+  eq('and it says it is private', privy.hello.private, true);
+  eq('with the max the opener asked for', privy.hello.max, 2);
+  ok('a private server is never in the list',
+    !list().some((s) => s.id === privy.hello.code), JSON.stringify(list()));
+  const friend = await enter('code', { code: privy.hello.code, max: 12, name: 'Sam' });
+  eq('a friend with the code gets in', friend.hello.players.length, 2);
+  eq('under the opener\'s max, not their own', friend.hello.max, 2);
+  eq('and knows it is private', friend.hello.private, true);
+  const late = await enter('code', { code: privy.hello.code });
+  eq('a third player is turned away from a two-player private server',
+    late.hello.t + ':' + late.hello.why, 'bye:full');
+  const auto = await enter('any', { max: 12 });
+  ok('matchmaking never puts anybody in a private server',
+    auto.hello.server !== privy.hello.code && auto.hello.private === false,
+    auto.hello.server);
+
+  /* ---- the two name spaces cannot be crossed ---- */
+  const asCode = await wake().connect(fakeSocket('sneak'), {
+    game: GAME, way: 'code', room: GAME + '/s-share1', pid: 'player-sneak', name: 'S'
+  });
+  eq('a public id handed in as a private code is refused outright', asCode.why, 'bad');
+  const asServer = await wake().connect(fakeSocket('sneak2'), {
+    game: GAME, way: 'server', room: GAME + '/ABCD', pid: 'player-sneak2', name: 'S'
+  });
+  eq('and a private code handed in as a public server id too', asServer.why, 'bad');
+  const elsewhere = await wake().connect(fakeSocket('sneak3'), {
+    game: GAME, way: 'server', room: OTHER + '/s-share1', pid: 'player-sneak3', name: 'S'
+  });
+  eq('a server in another game is not this game\'s to ask for', elsewhere.why, 'bad');
+  ok('an id is public or private by its shape and nothing else',
+    isPublicId('s-ab12cd') && !isPublicId('ABCD') && !isPublicId('S-AB12CD') &&
+    !isPublicId('s-ab') && publicKeyOf('friend-one', 'G', 's-ab12cd') ===
+    'friend-one/g/s-ab12cd');
+
+  /* ---- coming back to the server you were in ---- */
+  const wasCount = list().length;
+  const back = await enter('server', {
+    id: first.hello.server, pid: first.pid, strict: true, max: 3
+  });
+  eq('a player coming back lands in the same server even though it is full',
+    back.hello.server, first.hello.server);
+  eq('and is not counted as an extra player', back.hello.players.length, 3);
+  eq('their old socket is told it was replaced', first.ws.last().why, 'replaced');
+  eq('no new server was opened for them', list().length, wasCount);
+  const backAuto = await enter('any', { pid: second.pid, max: 3 });
+  eq('a returning player is sent back by pid alone, with no server asked for',
+    backAuto.hello.server, first.hello.server);
+  eq('still three of three', backAuto.hello.players.length, 3);
+  eq('and still no new server', list().length, wasCount);
+
+  /* ---- the host still moves on inside a server ---- */
+  back.ws.readyState = 3;
+  await wake().close(back.ws);
+  const heard = backAuto.ws.got().slice(-2);
+  eq('the server is told who left', heard[0].t + ':' + heard[0].id, 'leave:' + first.pid);
+  eq('and who has it now', heard[1].t + ':' + heard[1].id, 'host:' + second.pid);
+  eq('that server is down to two',
+    list().filter((s) => s.id === first.hello.server)[0].players, 2);
+
+  /*
+   * ---- two players arriving in the same instant ----
+   * Matchmaking is one synchronous pass after the awaits at the top of connect, so the
+   * second of two players who arrive together cannot be given a place the first one has
+   * just taken. The storage here answers slowly on purpose, so both connects really are
+   * in the air at the same time.
+   */
+  const raceSeats = fakeRoomState();
+  const slowDisk = {
+    async get() {
+      await new Promise((r) => setTimeout(r, 5));
+      return undefined;
+    },
+    async put() { /* nothing to keep */ },
+    async delete() { /* nothing to delete */ }
+  };
+  const raceCore = new RoomsCore(raceSeats.ops(slowDisk, () => now));
+  const RACE = gameKeyOf('friend-one', 'race');
+  const runnerA = fakeSocket('race-a');
+  const runnerB = fakeSocket('race-b');
+  await Promise.all([
+    raceCore.connect(runnerA, { game: RACE, way: 'any', max: 1, pid: 'race-a', name: 'A' }),
+    raceCore.connect(runnerB, { game: RACE, way: 'any', max: 1, pid: 'race-b', name: 'B' })
+  ]);
+  ok('two players arriving together are not both given the last place',
+    runnerA.last().server !== runnerB.last().server,
+    runnerA.last().server + ' / ' + runnerB.last().server);
+  eq('each of them is alone in a server of one',
+    runnerA.last().players.length + runnerB.last().players.length, 2);
+  eq('and the game has two servers, not one with two people in it',
+    raceCore.serverList(RACE).length, 2);
+
+  /* ---- the list is capped, and in the same order twice running ---- */
+  const crowd = fakeRoomState();
+  const CROWDED = gameKeyOf('friend-one', 'crowded');
+  for (let i = 0; i < MAX_LIST + 5; i++) {
+    const two = (i < 10 ? '0' : '') + i;
+    await enter('server',
+      { id: 's-mm' + two, max: 1, strict: true, game: CROWDED }, crowd);
+  }
+  const crowdCore = new RoomsCore(crowd.ops(fakeStorage(), () => now));
+  eq('at most fifty servers come back in one list',
+    crowdCore.serverList(CROWDED).length, MAX_LIST);
+  eq('and the same fifty in the same order twice running',
+    crowdCore.serverList(CROWDED).map((s) => s.id).join(),
+    crowdCore.serverList(CROWDED).map((s) => s.id).join());
+  eq('every row says what it is',
+    JSON.stringify(crowdCore.serverList(CROWDED)[0]),
+    JSON.stringify({ id: 's-mm00', players: 1, max: 1 }));
+}
+
+/* ---------- 15f. the library, on fake sockets in node ---------- */
+
+/*
+ * public/room.js is a plain script for a browser, so it is run here in its own context
+ * with a fake window, a fake WebSocket and a clock the test turns itself. That is
+ * enough to prove what the game's own page cannot be asked about: the address the
+ * library builds for each way in, ?hubserver= being picked up, and a reconnect going
+ * back to the SAME server instead of wherever matchmaking would put a new player.
+ */
+async function libRoom(opts) {
+  const o = opts || {};
+  const vm = await import('node:vm');
+  const code = fs.readFileSync(new URL('../public/room.js', import.meta.url), 'utf8');
+  const opened = [];
+  const timers = [];
+  let next = 0;
+  function FakeSocket(url) {
+    this.url = url;
+    this.readyState = 1;
+    this.sent = [];
+    this.closed = false;
+    const self = this;
+    this.send = function (line) {
+      self.sent.push(line);
+    };
+    this.close = function () {
+      self.readyState = 3;
+      self.closed = true;
+    };
+    opened.push(this);
+  }
+  const held = new Map();
+  const sandbox = {
+    WebSocket: FakeSocket,
+    URL: URL,
+    Uint8Array: Uint8Array,
+    Math: Math,
+    JSON: JSON,
+    fetch: o.fetch,
+    setTimeout: (fn, ms) => {
+      next++;
+      timers.push({ id: next, fn: fn, ms: ms || 0 });
+      return next;
+    },
+    clearTimeout: (id) => {
+      for (let i = timers.length - 1; i >= 0; i--) if (timers[i].id === id) timers.splice(i, 1);
+    },
+    location: {
+      search: o.search || '',
+      pathname: o.pathname || '/space-dodge/',
+      href: 'https://friend-one.github.io' + (o.pathname || '/space-dodge/') + (o.search || '')
+    },
+    window: {
+      crypto: {
+        getRandomValues: (buf) => {
+          for (let i = 0; i < buf.length; i++) buf[i] = (i * 7 + 3) % 251;
+          return buf;
+        }
+      },
+      sessionStorage: {
+        getItem: (k) => (held.has(k) ? held.get(k) : null),
+        setItem: (k, v) => held.set(k, String(v))
+      }
+    }
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox);
+  return {
+    HubRoom: sandbox.HubRoom,
+    opened: opened,
+    /* only the short waits: the 15-second connect guard is not what a test is after */
+    tick: () => {
+      const due = timers.filter((t) => t.ms <= 1000);
+      for (const t of due) {
+        const at = timers.indexOf(t);
+        if (at >= 0) timers.splice(at, 1);
+        t.fn();
+      }
+    },
+    say: (sock, obj) => sock.onmessage({ data: JSON.stringify(obj) })
+  };
+}
+
+function askedFor(url) {
+  const u = new URL(url.replace(/^ws/, 'http'));
+  const out = {};
+  u.searchParams.forEach((v, k) => {
+    out[k] = v;
+  });
+  return out;
+}
+
+async function testRoomLibrary() {
+  console.log('rooms: the library');
+  const plain = await libRoom();
+  ok('the library hands a game the three ways in',
+    typeof plain.HubRoom.play === 'function' && typeof plain.HubRoom.host === 'function' &&
+    typeof plain.HubRoom.join === 'function' && typeof plain.HubRoom.servers === 'function');
+  ok('and still makes a code for a game that wants its own',
+    CODE_RE4.test(plain.HubRoom.newCode()), plain.HubRoom.newCode());
+
+  const simple = plain.HubRoom.play({ max: 3, name: 'Sam' });
+  const q = askedFor(plain.opened[0].url);
+  eq('play() asks for any public server', q.want, 'any');
+  eq('with the max the game set', q.max, '3');
+  eq('for the game the page is in', q.g, 'space-dodge');
+  eq('and nothing about a code', q.code, undefined);
+  eq('and it is not pinned to one server yet', q.only, undefined);
+  eq('the room says which way in it is', simple.isPrivate, false);
+
+  const pick = await libRoom();
+  pick.HubRoom.play({ max: 3, server: 's-ab12cd' });
+  const pq2 = askedFor(pick.opened[0].url);
+  eq('play() with a server asks for that one', pq2.want, 'server');
+  eq('by id', pq2.server, 's-ab12cd');
+  eq('but will take another if it is full', pq2.only, undefined);
+
+  const hosted = await libRoom();
+  hosted.HubRoom.host({ max: 2 });
+  const hq = askedFor(hosted.opened[0].url);
+  eq('host() asks for a new private server', hq.want, 'new');
+  eq('with its max', hq.max, '2');
+
+  const joined2 = await libRoom();
+  joined2.HubRoom.join({ code: 'abcd' });
+  const jq = askedFor(joined2.opened[0].url);
+  eq('join() asks for the code, in capitals', jq.code, 'ABCD');
+  eq('and says nothing about a way in, exactly as a game written before all this does',
+    jq.want, undefined);
+
+  /* ?hubserver= in the page's address */
+  const linked = await libRoom({ search: '?hubserver=s-zz9988' });
+  linked.HubRoom.play({ max: 4 });
+  const lq = askedFor(linked.opened[0].url);
+  eq('a link with ?hubserver= sends the player into that server', lq.server, 's-zz9988');
+  eq('without the game doing anything', lq.want, 'server');
+  const odd = await libRoom({ search: '?hubserver=../../etc&x=1' });
+  odd.HubRoom.play({ max: 4 });
+  const oq = askedFor(odd.opened[0].url);
+  eq('anything that is not a server id is ignored', oq.server, undefined);
+  eq('and the player is simply matched', oq.want, 'any');
+  const both = await libRoom({ search: '?hubserver=s-zz9988' });
+  both.HubRoom.play({ max: 4, server: 's-aa11bb' });
+  eq('a game that names a server itself wins',
+    askedFor(both.opened[0].url).server, 's-aa11bb');
+
+  /* a dropped connection comes back to the SAME server */
+  const live = await libRoom();
+  const room = live.HubRoom.play({ max: 3 });
+  live.say(live.opened[0], {
+    t: 'hello', you: 'p1', host: 'p1', code: '', server: 's-ab12cd', private: false,
+    max: 3, players: [{ id: 'p1', name: 'Sam' }]
+  });
+  eq('the hello tells the game which server it is in', room.server, 's-ab12cd');
+  eq('how many fit', room.max, 3);
+  eq('that it is public', room.isPrivate, false);
+  eq('and leaves the code empty', room.code, '');
+  live.opened[0].onclose();
+  live.tick();
+  const again = askedFor(live.opened[1].url);
+  eq('a reconnect asks for that very server', again.server, 's-ab12cd');
+  eq('and will take no other', again.only, '1');
+
+  /* a private server reconnects by its code */
+  const priv = await libRoom();
+  const mine = priv.HubRoom.host({ max: 2 });
+  priv.say(priv.opened[0], {
+    t: 'hello', you: 'p1', host: 'p1', code: 'KTPM', server: 'KTPM', private: true,
+    max: 2, players: [{ id: 'p1', name: 'Pat' }]
+  });
+  eq('host() learns its code from the hello', mine.code, 'KTPM');
+  eq('and says it is private', mine.isPrivate, true);
+  priv.opened[0].onclose();
+  priv.tick();
+  const pq = askedFor(priv.opened[1].url);
+  eq('a private server is rejoined by its code', pq.code, 'KTPM');
+  eq('and never asks for a new one again', pq.want, undefined);
+
+  /* the server list */
+  const good = await libRoom({
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        servers: [
+          { id: 's-ab12cd', players: 2, max: 3 },
+          { id: 'SECRET', players: 1, max: 4 },
+          { id: 's-ok1234', players: 'lots', max: 3 },
+          { id: 's-zz9988', players: 0, max: 12 }
+        ]
+      })
+    })
+  });
+  let got = null;
+  good.HubRoom.servers((list) => {
+    got = list;
+  });
+  await new Promise((r) => setTimeout(r, 5));
+  eq('the list keeps only rows that look like servers', JSON.stringify(got),
+    JSON.stringify([{ id: 's-ab12cd', players: 2, max: 3 },
+      { id: 's-zz9988', players: 0, max: 12 }]));
+
+  const broken = await libRoom({ fetch: () => Promise.reject(new Error('no network')) });
+  let out = 'never called';
+  broken.HubRoom.servers((list) => {
+    out = JSON.stringify(list);
+  });
+  await new Promise((r) => setTimeout(r, 5));
+  eq('a list that cannot be fetched is an empty list, not an error', out, '[]');
+  const none = await libRoom();
+  let noFetch = 'never called';
+  none.HubRoom.servers((list) => {
+    noFetch = JSON.stringify(list);
+  });
+  eq('and so is a browser with no fetch at all', noFetch, '[]');
+}
+
+/* ---------- 15g. rooms through the site ---------- */
 
 async function testRoomRoutes() {
   console.log('rooms through the site');
@@ -2343,6 +2872,26 @@ async function testRoomRoutes() {
   ok('nothing raw from the client is passed on',
     member.body.raw.indexOf('g=') < 0 && member.body.raw.indexOf('code=') < 0,
     member.body.raw);
+
+  /* ---- the three ways in, as the object is handed them ---- */
+  const from = 'https://friend-one.github.io';
+  const anyOne = await ask('?g=space-dodge&want=any&max=3&pid=pid-abc123&name=Ann', from);
+  eq('a public, automatic join is forwarded as "any"', anyOne.body.way, 'any');
+  eq('with the game key it belongs to', anyOne.body.game, 'friend-one/space-dodge');
+  eq('and the max it asked for', anyOne.body.max, '3');
+  eq('and no server chosen by the client', anyOne.body.room, '');
+  const pinned = await ask(
+    '?g=space-dodge&want=server&server=s-ab12cd&only=1&pid=pid-abc123', from);
+  eq('a given public server arrives as a finished key', pinned.body.room,
+    'friend-one/space-dodge/s-ab12cd');
+  eq('with "that one or nothing"', pinned.body.only, '1');
+  const fresh = await ask('?g=space-dodge&want=new&max=2&pid=pid-abc123', from);
+  eq('a new private server is the object\'s to name, not the client\'s', fresh.body.room, '');
+  eq('so only the word goes across', fresh.body.way, 'new');
+  const sideways = await ask('?g=space-dodge&want=sideways&pid=pid-abc123', from);
+  eq('a way in nobody has heard of is refused', sideways.res.status, 400);
+  const bothWays = await ask('?g=space-dodge&want=any&code=ABCD&pid=pid-abc123', from);
+  eq('and so is a code with a public join', bothWays.res.status, 400);
 
   const stranger = await ask(good, 'https://stranger.github.io');
   eq('somebody who is not a member gets 403', stranger.res.status, 403);
@@ -2383,6 +2932,89 @@ async function testRoomRoutes() {
   ok('an ordinary file is not readable from another origin',
     ordinary.res.headers.get('Cross-Origin-Resource-Policy') !== 'cross-origin',
     String(ordinary.res.headers.get('Cross-Origin-Resource-Policy')));
+}
+
+/* ---------- 15h. the list of a game's public servers, through the site ---------- */
+
+async function testServerList() {
+  console.log('rooms: the list through the site');
+  const { env, store } = world();
+  await joined('friend-one', env, store);
+  await joined('friend-two', env, store);
+  /* the object's own side, with real sockets in real servers behind the route */
+  const core = env.PRESENCE.roomsCore;
+  const put = async (game, id, pid, max) => {
+    const ws = fakeSocket(pid);
+    await core.connect(ws, {
+      game: game, way: id.indexOf('s-') === 0 ? 'server' : 'code', room: game + '/' + id,
+      strict: true, max: max || 3, pid: pid, name: 'P'
+    });
+    return ws;
+  };
+  const mine = 'friend-one/space-dodge';
+  await put(mine, 's-aaa111', 'player-one');
+  await put(mine, 's-aaa111', 'player-two');
+  await put(mine, 's-bbb222', 'player-three');
+  const secret = await put(mine, 'ABCD', 'player-four');
+  await put('friend-two/space-dodge', 's-ccc333', 'player-five');
+
+  const listed = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'https://friend-one.github.io', headers: {}
+  });
+  eq('a game may ask the Hub for its public servers', listed.res.status, 200);
+  eq('fullest first, with the counts and the max', JSON.stringify(listed.body),
+    JSON.stringify({
+      ok: true,
+      servers: [{ id: 's-aaa111', players: 2, max: 3 }, { id: 's-bbb222', players: 1, max: 3 }]
+    }));
+  eq('the asking origin is echoed back, so the game may read the answer',
+    listed.res.headers.get('Access-Control-Allow-Origin'), 'https://friend-one.github.io');
+  ok('and never as a bare star',
+    listed.res.headers.get('Access-Control-Allow-Origin') !== '*');
+  eq('the answer is told apart by origin', listed.res.headers.get('Vary'), 'Origin');
+  ok('and never cached', (listed.res.headers.get('Cache-Control') || '').indexOf('no-store') >= 0,
+    listed.res.headers.get('Cache-Control'));
+  ok('a private server is not in it', listed.text.indexOf('ABCD') < 0, listed.text);
+  ok('and neither is another member\'s game', listed.text.indexOf('s-ccc333') < 0);
+
+  const theirs = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'https://friend-two.github.io', headers: {}
+  });
+  eq('another member asking about "space-dodge" gets their own game\'s servers',
+    JSON.stringify(theirs.body.servers), JSON.stringify([{ id: 's-ccc333', players: 1, max: 3 }]));
+
+  const outsider = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'https://evil.example.com', headers: {}
+  });
+  eq('another website is turned down', outsider.res.status, 403);
+  eq('with no origin echoed back at it',
+    outsider.res.headers.get('Access-Control-Allow-Origin'), null);
+  const nonMember = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'https://stranger.github.io', headers: {}
+  });
+  eq('and so is somebody who is not a member', nonMember.res.status, 403);
+  const localGame = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'http://localhost:8797', headers: {}
+  });
+  eq('a game being tested on this computer may ask', localGame.res.status, 200);
+  eq('and sees its own corner, which is empty',
+    JSON.stringify(localGame.body.servers), '[]');
+  const badName = await call(env, '/room/servers?g=a/b', {
+    origin: 'https://friend-one.github.io', headers: {}
+  });
+  eq('a bad game name is refused', badName.res.status, 400);
+  const posted = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'https://friend-one.github.io', headers: {}, method: 'POST'
+  });
+  eq('and the list is only ever read', posted.res.status, 405);
+
+  /* a server that empties leaves the list on its own */
+  secret.readyState = 3;
+  await core.close(secret);
+  const emptied = await call(env, '/room/servers?g=space-dodge', {
+    origin: 'https://friend-one.github.io', headers: {}
+  });
+  eq('nothing about a server outlives its players', emptied.body.servers.length, 2);
 }
 
 /* ---------- 16. one document, no listing ---------- */
@@ -2530,7 +3162,8 @@ async function testHeaders() {
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHubRepo, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
   testDrafts, testCovers, testFavorites, testLoveMigration, testEditEveryField, testLongFields, testPresenceCore,
-  testPlayTime, testPresenceRoutes, testRooms, testRoomRequest, testRoomRoutes,
+  testPlayTime, testPresenceRoutes, testRooms, testServers, testRoomLibrary,
+  testRoomRequest, testRoomRoutes, testServerList,
   testOneDocument, testHeaders];
 
 (async () => {

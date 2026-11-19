@@ -4,9 +4,9 @@
  *
  * WHAT IT IS
  * Your game is static files on your own GitHub Pages, so it has no server and online
- * players have nowhere to meet. The Hub is that meeting point: everybody who joins the
- * same room code gets everybody else's messages, and nothing else happens. The Hub does
- * not read what you send, does not keep it, and knows nothing about your game's rules.
+ * players have nowhere to meet. The Hub is that meeting point: everybody in the same
+ * server gets everybody else's messages, and nothing else happens. The Hub does not
+ * read what you send, does not keep it, and knows nothing about your game's rules.
  *
  * PUT THIS IN YOUR PAGE
  *   <script src="https://hub.sp101.workers.dev/room.js"></script>
@@ -14,49 +14,77 @@
  * running on your own computer (http://localhost:... or http://127.0.0.1:...). From any
  * other address the Hub turns the connection down.
  *
+ * THE THREE WAYS IN
+ *
+ * 1. JUST PUT ME IN A SERVER. This is what most games want, and nobody types anything:
+ *      var room = HubRoom.play({ max: 3, name: myName });
+ *    You say how many players fit in ONE server (1 to 12). The Hub puts this player in
+ *    a server of your game that still has space - the fullest one first, so players end
+ *    up together - and opens a new one when they are all full. A fourth player of a
+ *    3-player game lands in a second server without noticing.
+ *
+ * 2. THAT SERVER, THE ONE THEY PICKED. Show the servers and let the player choose:
+ *      HubRoom.servers(function (list) {
+ *        // list is [{ id: 's-ab12cd', players: 2, max: 3 }, ...], fullest first
+ *      });
+ *      var room = HubRoom.play({ max: 3, server: 's-ab12cd' });
+ *    If that one filled up while they were looking, they are put in another one
+ *    instead (room.server says which, and the 'open' event has already fired).
+ *
+ * 3. PRIVATE, FOR FRIENDS. One player opens it and reads out the code; the others type
+ *    it. A private server is never listed and never used for 1. above:
+ *      var room = HubRoom.host({ max: 3, name: myName });   // then show room.code
+ *      var room = HubRoom.join({ code: 'ABCD', name: myName });
+ *    room.code is only there once the Hub has answered, so show it in 'open'.
+ *
  * THE WHOLE API
- *   var room = HubRoom.join({ code: 'ABCD', name: 'Sam' });
- *   room.on('open',    function (info) {});   // info.me, info.host, info.players
- *   room.on('join',    function (player) {}); // { id: '...', name: '...' }
- *   room.on('leave',   function (player) {}); // { id: '...', name: '...' }
- *   room.on('host',    function (id) {});     // room.isHost is already updated
+ *   HubRoom.play({ max: 3, name: 'Sam' })      a public server with space, or a new one
+ *   HubRoom.play({ max: 3, server: id })       that public server (another if it is full)
+ *   HubRoom.host({ max: 3, name: 'Sam' })      a new private server; room.code is its code
+ *   HubRoom.join({ code: 'ABCD', name: 'Sam' }) a private server by its code
+ *   HubRoom.servers(function (list) {})        this game's public servers
+ *   HubRoom.newCode()                          a 4-letter code with no look-alike letters
+ *   room.on('open',    function (info) {});    // info.me, info.host, info.players
+ *   room.on('join',    function (player) {});  // { id: '...', name: '...' }
+ *   room.on('leave',   function (player) {});  // { id: '...', name: '...' }
+ *   room.on('host',    function (id) {});      // room.isHost is already updated
  *   room.on('message', function (data, from) {});
- *   room.on('close',   function (why) {});    // see the reasons below
- *   room.send(data);                          // to everybody else in the room
- *   room.sendTo(id, data);                    // to one player
+ *   room.on('close',   function (why) {});     // see the reasons below
+ *   room.send(data);                           // to everybody else in the server
+ *   room.sendTo(id, data);                     // to one player
  *   room.leave();
  *   room.me        your own player id
  *   room.host      the id of the player whose browser should be running the game
  *   room.isHost    true when that is you
  *   room.players   [{ id, name }, ...], the host first, in the order they joined
- *   room.code      the room code, in capitals
+ *   room.server    which server you are in ('s-ab12cd', or the code of a private one)
+ *   room.max       how many players fit in it
+ *   room.isPrivate true when it was opened with host() or reached with join()
+ *   room.code      the code friends type - a private server only, '' for a public one
  *   room.connected true while the socket is up. A dropped connection is NOT a 'close':
  *                  the library tries again five times by itself, with the same player
- *                  id, and fires 'open' again when it is back. Show "Reconnecting..."
- *                  while room.connected is false, so a player is never left guessing.
- *   HubRoom.newCode()   a fresh 4-letter code with no look-alike letters in it
+ *                  id, back into the SAME server, and fires 'open' again when it is
+ *                  back. Show "Reconnecting..." while room.connected is false, so a
+ *                  player is never left guessing.
  *
- * join() takes: code (3-12 letters or numbers, required), name (up to 24 characters,
- * default "Player") and game (default: the folders in the page's address, so a game at
- * /space-dodge/ is the game "space-dodge" - two different games never share a room).
+ * All four take name (up to 24 characters, default "Player") and game (default: the
+ * folders in the page's address, so a game at /space-dodge/ is the game "space-dodge" -
+ * two different games never share a server). max is 1 to 12, anything else is clamped,
+ * and 12 is what you get if you leave it out. Whoever OPENS a server sets its max; a
+ * player who joins later and asks for a different one is ignored.
+ * HubRoom.servers never throws and hands you [] if anything at all goes wrong, so draw
+ * a "no servers yet" list from it and let the player press Play anyway.
+ * If the page's address carries ?hubserver=<id>, play() uses it on its own, so a link
+ * into a friend's server works without your game doing anything.
+ *
  * 'open' fires again after a reconnect. 'close' is the end: why is 'left' (you called
- * leave), 'lost' (the Hub could not be reached after five tries), 'full' (12 players
- * already, or the Hub is at its limit), 'limit' (the Hub has relayed its messages for
- * today), 'replaced' (the same player opened the room in another tab), 'slow' (way too
- * many messages), 'big' (a message over 16 KB) or 'bad'.
- *
- * NO CODE: EVERYBODY JUST LOADS IN
- * A code is only for private rooms. For a game where anyone who presses Play lands in
- * the same fight, join a fixed room and nobody ever types anything:
- *   function enter(n) {
- *     var room = HubRoom.join({ code: 'MAIN' + n, name: myName });
- *     room.on('close', function (why) { if (why === 'full') enter(n + 1); });
- *     return room;
- *   }
- *   enter(1);   // MAIN1 holds 12 players, the 13th lands in MAIN2, and so on
+ * leave), 'lost' (the Hub could not be reached after five tries), 'full' (that server
+ * is full and no other would do, or the Hub is at its limit), 'limit' (the Hub has
+ * relayed its messages for today), 'replaced' (the same player opened the game in
+ * another tab), 'slow' (way too many messages), 'big' (a message over 16 KB) or 'bad'.
  *
  * THE LIMITS, AND THE ONE RULE THAT MATTERS
- *   12 players in a room. 16 KB a message.
+ *   12 players in a server. 16 KB a message.
  *   KEEP IT UNDER ABOUT 15 MESSAGES A SECOND PER PLAYER: send positions and state ON A
  *   TIMER (setInterval, 10-15 times a second), NEVER one message per animation frame.
  *   Move things smoothly between the updates you get instead - every game worth playing
@@ -92,10 +120,14 @@ var HubRoom = (function () {
      the same from GitHub Pages, from the Hub's own address and from a local copy. */
   var FALLBACK = 'https://hub.sp101.workers.dev';
   var MAX_MSG = 16384;
+  var MAX_PLAYERS = 12;
   var CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; /* no I and no O: nothing to mistype */
   var PID_LETTERS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  /* a public server id, the shape the Hub makes them: never a code anybody types */
+  var SERVER_RE = /^s-[a-z0-9]{4,12}$/;
   var WAITS = [500, 1000, 2000, 4000, 8000];
   var CONNECT_WAIT = 15000;
+  var LIST_WAIT = 8000;
   var PID_KEY = 'hubroom.pid';
   var memoryPid = '';
 
@@ -185,6 +217,11 @@ var HubRoom = (function () {
     return name || 'game';
   }
 
+  function gameName(asked) {
+    return String(asked || gameFromPath()).replace(/[^A-Za-z0-9._-]/g, '')
+      .toLowerCase().slice(0, 60) || 'game';
+  }
+
   function cleanName(raw) {
     var s = String(raw === undefined || raw === null ? '' : raw);
     s = s.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').replace(/^ | $/g, '');
@@ -192,18 +229,65 @@ var HubRoom = (function () {
     return s || 'Player';
   }
 
+  function cleanCode(raw) {
+    return String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  }
+
+  /* A server id is only ever something the Hub made. Anything else is not one. */
+  function cleanServer(raw) {
+    var s = String(raw === undefined || raw === null ? '' : raw).toLowerCase();
+    return SERVER_RE.test(s) ? s : '';
+  }
+
+  function cleanMax(raw) {
+    var n = Math.floor(Number(raw));
+    if (!isFinite(n) || n < 1) return 0; /* 0 means "did not say" */
+    return n > MAX_PLAYERS ? MAX_PLAYERS : n;
+  }
+
+  /*
+   * A server id in the page's address: hub.sp101.workers.dev will link a player
+   * straight into a friend's server with ?hubserver=<id>, and play() picks it up
+   * without the game doing a thing. Read once, checked for shape, anything odd ignored.
+   */
+  function serverFromUrl() {
+    try {
+      var m = /[?&]hubserver=([^&#]*)/.exec(String(location.search || ''));
+      return m ? cleanServer(decodeURIComponent(m[1])) : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   /* read once, while this script is the one running: document.currentScript is only
      the truth now, not later inside a game's callback */
   var HUB = hubOrigin();
+  var FROM_URL = serverFromUrl();
 
-  function join(opts) {
+  /*
+   * One way in, four shapes of it:
+   *   'any'     a public server with space, or a new one
+   *   'server'  that public server by id (another one if it is full)
+   *   'new'     a new private server, and the Hub picks its code
+   *   'code'    a private server by the code a friend read out
+   */
+  function open(way, opts) {
     var o = opts || {};
     var hub = HUB;
     var pid = playerId();
     var name = cleanName(o.name);
-    var game = String(o.game || gameFromPath()).replace(/[^A-Za-z0-9._-]/g, '')
-      .toLowerCase().slice(0, 60) || 'game';
-    var code = String(o.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+    var game = gameName(o.game);
+    var max = cleanMax(o.max);
+    var code = cleanCode(o.code);
+    var server = cleanServer(o.server);
+    var mode = way;
+    var strict = false;
+
+    /* a link into a friend's server, when the game did not name one itself */
+    if (mode === 'any' && !server && FROM_URL) server = FROM_URL;
+    if (mode === 'any' && server) mode = 'server';
+    /* an id that is not an id is no reason to leave the player standing outside */
+    if (mode === 'server' && !server) mode = 'any';
 
     var handlers = {};
     var sock = null;
@@ -214,12 +298,15 @@ var HubRoom = (function () {
     var guard = null;
 
     var room = {
-      code: code,
+      code: mode === 'code' ? code : '',
       game: game,
       me: pid,
       host: null,
       isHost: false,
       players: [],
+      server: mode === 'code' ? code : (server || null),
+      max: max || null,
+      isPrivate: mode === 'code' || mode === 'new',
       connected: false,
       hub: hub
     };
@@ -305,6 +392,27 @@ var HubRoom = (function () {
           }
         }
         if (typeof m.code === 'string' && m.code) room.code = m.code;
+        if (typeof m.max === 'number' && m.max > 0) room.max = m.max;
+        if (typeof m.private === 'boolean') room.isPrivate = m.private;
+        /*
+         * WHICH SERVER THIS IS - and a dropped connection must come back to THIS one,
+         * not to wherever matchmaking would put a new player. A private server is asked
+         * for by its code; a public one by its id, with "that one or nothing", so a
+         * reconnect never lands the player in a different game in progress. If it has
+         * emptied in the meantime it simply exists again under the same id.
+         */
+        if (typeof m.server === 'string' && m.server) {
+          room.server = m.server;
+          if (room.isPrivate) {
+            mode = 'code';
+            code = m.server;
+            strict = false;
+          } else {
+            mode = 'server';
+            server = m.server;
+            strict = true;
+          }
+        }
         room.connected = true;
         clearTimers();
         emit('open', { me: room.me, host: room.host, players: room.players.slice() });
@@ -336,16 +444,28 @@ var HubRoom = (function () {
       }
     }
 
+    function address() {
+      var wsBase = hub.replace(/^http/, 'ws');
+      var url = wsBase + '/room?g=' + encodeURIComponent(game) +
+        '&name=' + encodeURIComponent(name) +
+        '&pid=' + encodeURIComponent(pid);
+      if (mode === 'code') url += '&code=' + encodeURIComponent(code);
+      else {
+        url += '&want=' + mode;
+        if (mode === 'server') {
+          url += '&server=' + encodeURIComponent(server);
+          if (strict) url += '&only=1';
+        }
+      }
+      if (max) url += '&max=' + max;
+      return url;
+    }
+
     function connect() {
       if (finished) return;
       clearTimers();
-      var wsBase = hub.replace(/^http/, 'ws');
-      var url = wsBase + '/room?g=' + encodeURIComponent(game) +
-        '&code=' + encodeURIComponent(code) +
-        '&name=' + encodeURIComponent(name) +
-        '&pid=' + encodeURIComponent(pid);
       try {
-        sock = new WebSocket(url);
+        sock = new WebSocket(address());
       } catch (e) {
         retry();
         return;
@@ -425,7 +545,7 @@ var HubRoom = (function () {
       finish('left');
     };
 
-    if (code.length < 3) {
+    if (mode === 'code' && code.length < 3) {
       /* no code, nothing to join: say so the same way everything else is said */
       setTimeout(function () {
         finish('bad');
@@ -436,7 +556,81 @@ var HubRoom = (function () {
     return room;
   }
 
-  var api = { join: join, newCode: newCode, hub: HUB, maxMessage: MAX_MSG };
+  function play(opts) {
+    return open('any', opts);
+  }
+
+  function host(opts) {
+    return open('new', opts);
+  }
+
+  function join(opts) {
+    return open('code', opts);
+  }
+
+  /*
+   * This game's public servers, fullest first. It never throws and never leaves a game
+   * waiting: anything that goes wrong - no network, a refusal, nonsense in the answer -
+   * is an empty list.
+   */
+  function servers(a, b) {
+    var fn = typeof a === 'function' ? a : (typeof b === 'function' ? b : null);
+    var o = (a && typeof a === 'object' ? a : (b && typeof b === 'object' ? b : null)) || {};
+    if (!fn) return;
+    var done = false;
+    var timer = null;
+    function hand(list) {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      try {
+        fn(list);
+      } catch (e) {
+        /* the game's own callback throwing is the game's business */
+      }
+    }
+    function tidy(body) {
+      var out = [];
+      var rows = body && body.servers && body.servers.length ? body.servers : [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        if (!r || !cleanServer(r.id)) continue;
+        var players = Math.floor(Number(r.players));
+        var max = Math.floor(Number(r.max));
+        if (!isFinite(players) || players < 0) continue;
+        if (!isFinite(max) || max < 1) continue;
+        out.push({ id: String(r.id), players: players, max: max });
+      }
+      return out;
+    }
+    try {
+      timer = setTimeout(function () {
+        hand([]);
+      }, LIST_WAIT);
+      fetch(HUB + '/room/servers?g=' + encodeURIComponent(gameName(o.game)), {
+        method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store'
+      }).then(function (res) {
+        return res && res.ok ? res.json() : null;
+      }).then(function (body) {
+        hand(tidy(body));
+      }, function () {
+        hand([]);
+      });
+    } catch (e) {
+      hand([]);
+    }
+  }
+
+  var api = {
+    play: play,
+    host: host,
+    join: join,
+    servers: servers,
+    newCode: newCode,
+    hub: HUB,
+    maxPlayers: MAX_PLAYERS,
+    maxMessage: MAX_MSG
+  };
   if (typeof window !== 'undefined') window.HubRoom = api;
   return api;
 }());

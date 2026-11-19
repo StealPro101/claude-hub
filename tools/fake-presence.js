@@ -4,6 +4,7 @@
  * PresenceCore without any Cloudflare runtime.
  */
 import { PresenceCore } from '../worker/presence.js';
+import { RoomsCore } from '../worker/rooms.js';
 
 export function fakeStorage() {
   const map = new Map();
@@ -108,20 +109,31 @@ export function fakePresence(opts) {
   /*
    * The "rooms" instance. Node cannot build a 101 response, so this answers an upgrade
    * with a plain 200 that repeats what the Worker forwarded - which is the thing a test
-   * of the Worker's side wants to see anyway: the finished room key, id and name, and
-   * nothing raw from the client. On Cloudflare the real object answers 101 instead and
-   * the Worker hands that straight back, untouched.
+   * of the Worker's side wants to see anyway: the finished room key, the way in, the
+   * max, the id and the name, and nothing raw from the client. On Cloudflare the real
+   * object answers 101 instead and the Worker hands that straight back, untouched.
+   *
+   * The server list is answered by a REAL RoomsCore on fake sockets (roomsSeats), so a
+   * test can put players in servers and then ask the Hub for the list the way a game
+   * does, all the way through handle().
    */
+  const roomsSeats = fakeRoomState();
+  const roomsDisk = o.roomsStorage || fakeStorage();
+  const roomsCore = new RoomsCore(roomsSeats.ops(roomsDisk, o.clock || (() => Date.now())));
   const roomsStub = {
     seen: [],
     async fetch(url, init) {
       const headers = new Headers((init && init.headers) || (url && url.headers) || {});
       const href = typeof url === 'string' ? url : url.url;
+      const u = new URL(href);
       if ((headers.get('Upgrade') || '').toLowerCase() === 'websocket') {
-        const u = new URL(href);
         const asked = {
           upgrade: true,
           room: u.searchParams.get('room'),
+          game: u.searchParams.get('game'),
+          way: u.searchParams.get('want'),
+          max: u.searchParams.get('max'),
+          only: u.searchParams.get('only'),
           pid: u.searchParams.get('pid'),
           name: u.searchParams.get('name'),
           raw: u.search
@@ -131,6 +143,11 @@ export function fakePresence(opts) {
           status: 200, headers: { 'Content-Type': 'application/json' }
         });
       }
+      if (u.pathname === '/servers') {
+        return new Response(JSON.stringify({
+          ok: true, servers: roomsCore.serverList(u.searchParams.get('game') || '')
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       return stub.fetch(url, init);
     }
   };
@@ -138,6 +155,8 @@ export function fakePresence(opts) {
   return {
     core: core,
     rooms: roomsStub,
+    roomsCore: roomsCore,
+    roomsSeats: roomsSeats,
     idFromName(name) { return name === 'rooms' ? 'rooms' : 'hub'; },
     get(id) { return id === 'rooms' ? roomsStub : stub; },
     break(on) { o.broken = on !== false; }

@@ -15,7 +15,7 @@ import {
 import { kvStore } from './store.js';
 import { getState, update, gameId as keyFor } from './state.js';
 import { PresenceCore, presenceClient } from './presence.js';
-import { RoomsCore, roomRequest } from './rooms.js';
+import { RoomsCore, roomRequest, serversRequest } from './rooms.js';
 import { makeGitHub, makeBudget } from './github.js';
 import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
@@ -121,6 +121,20 @@ function storeOf(env) {
   return store;
 }
 
+/*
+ * Whose games may use the rooms: every member's GitHub login, plus the Hub owner's for
+ * the house games. One read of the one document, for the two room routes.
+ */
+async function roomLogins(env) {
+  const state = await getState(storeOf(env));
+  const logins = new Set([houseOwner(env).toLowerCase()]);
+  for (const key of Object.keys(state.members)) {
+    const rec = state.members[key];
+    if (rec && typeof rec.login === 'string') logins.add(rec.login.toLowerCase());
+  }
+  return logins;
+}
+
 let hubCache = { at: 0, body: null };
 
 /* ---------- the handler ---------- */
@@ -137,7 +151,8 @@ async function handle(request, env, ctx) {
    * response (as withSecurity does) would throw the socket away.
    *
    * Everything the client asked for is checked HERE and nowhere else - the object is
-   * handed the finished room key, player id and name, and reads nothing raw.
+   * handed the way in, the game, the finished server key (when the client named one),
+   * the clamped max, the player id and the cleaned name, and reads nothing raw.
    */
   if (path === '/room') {
     if (method !== 'GET') return errorJson(405, 'GET only');
@@ -147,21 +162,52 @@ async function handle(request, env, ctx) {
     if (!rateLimit(ip, 'room', 30, 60000)) return errorJson(429, 'slow down a moment');
     const binding = env.PRESENCE;
     if (!binding) return errorJson(503, 'rooms are not switched on');
-    const store = storeOf(env);
-    const state = await getState(store);
-    /* a room may be opened from a member's own Pages site, or the Hub owner's */
-    const logins = new Set([houseOwner(env).toLowerCase()]);
-    for (const key of Object.keys(state.members)) {
-      const rec = state.members[key];
-      if (rec && typeof rec.login === 'string') logins.add(rec.login.toLowerCase());
-    }
-    const asked = roomRequest(url, request.headers.get('Origin'), logins);
+    const asked = roomRequest(url, request.headers.get('Origin'), await roomLogins(env));
     if (!asked.ok) return errorJson(asked.status, asked.error);
     const stub = binding.get(binding.idFromName('rooms'));
     /* the same request, with a URL that carries only what came back from the check */
-    const inside = 'https://rooms.invalid/join?room=' + encodeURIComponent(asked.room) +
-      '&pid=' + encodeURIComponent(asked.pid) + '&name=' + encodeURIComponent(asked.name);
+    const inside = 'https://rooms.invalid/join?pid=' + encodeURIComponent(asked.pid) +
+      '&name=' + encodeURIComponent(asked.name) +
+      '&want=' + encodeURIComponent(asked.way) +
+      '&game=' + encodeURIComponent(asked.gameKey) +
+      '&room=' + encodeURIComponent(asked.room) +
+      '&max=' + String(asked.max) + (asked.strict ? '&only=1' : '');
     return stub.fetch(new Request(inside, request));
+  }
+
+  /*
+   * THE LIST of a game's public servers, for a game that lets a player pick one. Not an
+   * upgrade and not a message: it is never counted against the day's message cap, and
+   * it never says a word about a private server.
+   *
+   * It is fetched cross-origin by the library, so its answer is built and returned
+   * right here, with the asking origin echoed back after it has been checked - nothing
+   * in between is allowed to rebuild it and drop those headers.
+   */
+  if (path === '/room/servers') {
+    if (method !== 'GET') return errorJson(405, 'GET only');
+    if (!rateLimit(ip, 'servers', 60, 60000)) return errorJson(429, 'slow down a moment');
+    const binding = env.PRESENCE;
+    if (!binding) return errorJson(503, 'rooms are not switched on');
+    const origin = request.headers.get('Origin');
+    const asked = serversRequest(url, origin, await roomLogins(env));
+    if (!asked.ok) return errorJson(asked.status, asked.error);
+    const stub = binding.get(binding.idFromName('rooms'));
+    const res = await stub.fetch(new Request(
+      'https://rooms.invalid/servers?game=' + encodeURIComponent(asked.gameKey)
+    ));
+    let servers = [];
+    try {
+      const body = await res.json();
+      if (body && Array.isArray(body.servers)) servers = body.servers;
+    } catch (e) {
+      servers = [];
+    }
+    return json({ ok: true, servers: servers }, 200, {
+      /* only ever the origin that was just checked, and never a bare * */
+      'Access-Control-Allow-Origin': origin,
+      'Vary': 'Origin'
+    });
   }
 
   /*
@@ -612,15 +658,27 @@ export class Presence {
   }
 
   async fetch(request) {
+    const asked = new URL(request.url);
     if ((request.headers.get('Upgrade') || '').toLowerCase() === 'websocket') {
-      const url = new URL(request.url);
       const pair = new WebSocketPair();
       await this.roomsCore().connect(pair[1], {
-        room: url.searchParams.get('room') || '',
-        pid: url.searchParams.get('pid') || '',
-        name: url.searchParams.get('name') || ''
+        game: asked.searchParams.get('game') || '',
+        way: asked.searchParams.get('want') || '',
+        room: asked.searchParams.get('room') || '',
+        max: asked.searchParams.get('max') || '',
+        strict: asked.searchParams.get('only') === '1',
+        pid: asked.searchParams.get('pid') || '',
+        name: asked.searchParams.get('name') || ''
       });
       return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    /* the list of a game's public servers: read off the sockets, nothing stored, and
+       not a message, so the day's count is not touched */
+    if (asked.pathname === '/servers') {
+      const servers = this.roomsCore().serverList(asked.searchParams.get('game') || '');
+      return new Response(JSON.stringify({ ok: true, servers: servers }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
     let body = {};
     try {
