@@ -32,6 +32,7 @@ export class PresenceCore {
     this.seenVisit = new Map(); /* who|game -> at */
     this.rates = new Map();     /* key -> { start, n } */
     this.loaded = false;
+    this.loading = null;
     /* one flag per storage key, so an idle minute writes nothing at all */
     this.dirtyVisits = false;
     this.dirtyRecent = false;
@@ -39,8 +40,14 @@ export class PresenceCore {
     this.savedAt = 0;
   }
 
-  async load() {
-    if (this.loaded) return;
+  /* One read, however many callers: everybody who asks while it is still under way
+     waits for the same one, so nothing is ever written from a half-read object. */
+  load() {
+    if (!this.loading) this.loading = this.readStored();
+    return this.loading;
+  }
+
+  async readStored() {
     this.loaded = true;
     try {
       if (!this.storage) return;
