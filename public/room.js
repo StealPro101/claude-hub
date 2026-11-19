@@ -45,6 +45,16 @@
  * today), 'replaced' (the same player opened the room in another tab), 'slow' (way too
  * many messages), 'big' (a message over 16 KB) or 'bad'.
  *
+ * NO CODE: EVERYBODY JUST LOADS IN
+ * A code is only for private rooms. For a game where anyone who presses Play lands in
+ * the same fight, join a fixed room and nobody ever types anything:
+ *   function enter(n) {
+ *     var room = HubRoom.join({ code: 'MAIN' + n, name: myName });
+ *     room.on('close', function (why) { if (why === 'full') enter(n + 1); });
+ *     return room;
+ *   }
+ *   enter(1);   // MAIN1 holds 12 players, the 13th lands in MAIN2, and so on
+ *
  * THE LIMITS, AND THE ONE RULE THAT MATTERS
  *   12 players in a room. 16 KB a message.
  *   KEEP IT UNDER ABOUT 15 MESSAGES A SECOND PER PLAYER: send positions and state ON A
