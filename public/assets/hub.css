@@ -8,25 +8,75 @@
  */
 
 :root {
+  color-scheme: light;
   --page: #fcfcfc;
   --text: #575e75;
   --head: #2f3444;
   --soft: #7b8296;
   --line: #d9d9d9;
+  --line-hover: #c6c6c6;
   --strip: #f2f2f2;
   --band: #f5f5f6;
+  /* a raised surface - a card, a menu, the bar at the foot of the editor. In dark it
+     is not white at all, so anything that needs REAL white says #fff instead. */
   --white: #fff;
+  --field: #fff;
+  --chip: rgba(255, 255, 255, .93);
+  --chip-soft: rgba(255, 255, 255, .88);
+  --chip-ink: #8d93a3;
   --accent: #c2410c;
   --accent-dark: #9a330a;
   --accent-soft: #fdf1ea;
   --accent-line: #f0d6c6;
-  --field: #fff;
+  --accent-edge: #c6a07f;
+  --bar: #c2410c;
+  --btn: #c2410c;
+  --btn-hover: #9a330a;
+  --ok: #2e7d53;
+  --ok-soft: #eaf6ef;
+  --ok-line: #cce7d8;
+  --bad: #c0392b;
+  --live: #1a8a4a;
   /* how wide one game is drawn; a row or a grid overrides it with its size class */
   --tile: 216px;
   --gut: 28px;
   --read: 1100px;
   --radius: 10px;
   --sans: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+}
+
+/*
+ * Dark. The same site with its own neutral palette - nothing is inverted, nothing is
+ * borrowed. theme.js sets data-theme before the first paint, so there is no flash.
+ */
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --page: #15171c;
+  --text: #c5cad6;
+  --head: #f2f3f6;
+  --soft: #8d93a3;
+  --line: #333844;
+  --line-hover: #4a5160;
+  --strip: #262a33;
+  --band: #262a33;
+  --white: #1e2128;
+  --field: #262a33;
+  --chip: rgba(22, 24, 30, .86);
+  --chip-soft: rgba(22, 24, 30, .8);
+  --chip-ink: #c5cad6;
+  --accent: #f0702f;
+  --accent-dark: #ff8a4d;
+  --accent-soft: #33211a;
+  --accent-line: #5a3423;
+  --accent-edge: #7a4a2c;
+  --bar: #9a330a;
+  --btn: #c9480f;
+  --btn-hover: #e0580f;
+  --ok: #4ec98a;
+  --ok-soft: #1b2d24;
+  --ok-line: #2d4f3c;
+  --bad: #ff7b6b;
+  --live: #46c882;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -74,8 +124,8 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 /* ---------- top bar ---------- */
 
 .bar {
-  background: var(--accent);
-  color: var(--white);
+  background: var(--bar);
+  color: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
   position: relative;
   z-index: 40;
@@ -89,7 +139,7 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   gap: 14px;
 }
 
-.bar a { color: var(--white); text-decoration: none; }
+.bar a { color: #fff; text-decoration: none; }
 .bar a:hover { text-decoration: none; }
 
 .brand {
@@ -154,12 +204,13 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   font-size: 14.5px; font-weight: 600; transition: background .15s ease;
 }
 .bar-right .join:hover { background: rgba(255, 255, 255, .16); }
+/* a white pill on an orange bar in both themes, so its ink is fixed too */
 .bar-right .btn {
-  background: #fff; color: var(--accent); border-color: #fff;
+  background: #fff; color: #c2410c; border-color: #fff;
   height: 38px; padding: 0 18px; border-radius: 19px; font-size: 14.5px;
   transition: background .15s ease;
 }
-.bar-right .btn:hover { background: #fff3ec; color: var(--accent-dark); border-color: #fff3ec; }
+.bar-right .btn:hover { background: #fff3ec; color: #9a330a; border-color: #fff3ec; }
 
 /* your own name, and the menu that hangs off it - not off the edge of the page */
 .who { position: relative; }
@@ -219,17 +270,17 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 
 .btn {
   display: inline-flex; align-items: center; gap: 7px; justify-content: center;
-  background: var(--accent); color: var(--white); border: 1px solid var(--accent);
+  background: var(--btn); color: #fff; border: 1px solid var(--btn);
   border-radius: 5px; padding: 8px 16px; font: inherit; font-size: 13.5px; font-weight: 600;
   cursor: pointer; text-decoration: none; line-height: 1.2;
 }
-.btn:hover { background: var(--accent-dark); border-color: var(--accent-dark); text-decoration: none; }
+.btn:hover { background: var(--btn-hover); border-color: var(--btn-hover); text-decoration: none; }
 .btn:active { transform: translateY(1px); }
 .btn[disabled] { opacity: .5; cursor: default; transform: none; }
 .btn--ghost { background: var(--white); color: var(--accent); }
 .btn--ghost:hover { background: var(--accent-soft); color: var(--accent-dark); }
 .btn--grey { background: var(--white); color: var(--text); border-color: var(--line); }
-.btn--grey:hover { background: var(--strip); color: var(--head); border-color: #c6c6c6; }
+.btn--grey:hover { background: var(--strip); color: var(--head); border-color: var(--line-hover); }
 .btn--sm { padding: 5px 11px; font-size: 12.5px; }
 .btn--big { padding: 11px 22px; font-size: 15px; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -336,12 +387,12 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   font-size: 12.5px; color: var(--soft); }
 .thumb .tstats .chunk { display: inline-flex; align-items: center; gap: 4px;
   white-space: nowrap; }
-.thumb .tstats .chunk.live { color: #1a8a4a; font-weight: 600; }
+.thumb .tstats .chunk.live { color: var(--live); font-weight: 600; }
 
 /* the corner star: out of the way until you want it, lit when it is already yours */
 .thumb .fav {
   position: absolute; right: 5px; top: 5px; width: 27px; height: 27px; padding: 0;
-  border: 0; border-radius: 50%; background: rgba(255, 255, 255, .93); color: #8d93a3;
+  border: 0; border-radius: 50%; background: var(--chip); color: var(--chip-ink);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .25); opacity: 0;
   transition: opacity .12s ease, color .12s ease;
@@ -353,10 +404,10 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 
 /* on a touch screen there is no hover, so it is always there - small and quiet */
 @media (hover: none) {
-  .thumb .fav { opacity: 1; width: 22px; height: 22px; background: rgba(255, 255, 255, .88); }
+  .thumb .fav { opacity: 1; width: 22px; height: 22px; background: var(--chip-soft); }
   .thumb .fav svg { width: 13px; height: 13px; }
 }
-.thumb .flag { position: absolute; left: 0; top: 0; background: var(--accent);
+.thumb .flag { position: absolute; left: 0; top: 0; background: var(--btn);
   color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; padding: 2px 6px; border-radius: 9px 0 4px 0; }
 /* on a chart the number owns the top corner, so the flag drops to the bottom one */
@@ -439,7 +490,7 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 .toolbar .spacer { margin-left: auto; }
 
 select, input[type=text], input[type=number], input[type=search], textarea {
-  font: inherit; font-size: 13.5px; color: var(--head); background: var(--white);
+  font: inherit; font-size: 13.5px; color: var(--head); background: var(--field);
   border: 1px solid var(--line); border-radius: 5px; padding: 7px 10px; width: 100%;
 }
 select { padding-right: 26px; }
@@ -452,8 +503,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .inline-field { display: inline-block; width: auto; }
 .msg { margin-top: 10px; font-size: 13px; min-height: 1.1em; }
 .msg:empty { margin: 0; min-height: 0; }
-.msg.ok { color: #2e7d53; }
-.msg.bad { color: #c0392b; }
+.msg.ok { color: var(--ok); }
+.msg.bad { color: var(--bad); }
 
 /* ---------- game page ----------
    Structure borrowed from a big game site: the picture at the left, and at the right the
@@ -562,7 +613,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   font-size: 13.5px; font-weight: 600; color: var(--text); padding: 7px 14px;
 }
 .fav-btn svg { color: var(--soft); }
-.fav-btn:hover { border-color: #c6a07f; color: var(--head); }
+.fav-btn:hover { border-color: var(--accent-edge); color: var(--head); }
 .fav-btn:hover svg { color: var(--accent); }
 .fav-btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-dark); }
 .fav-btn.on svg { color: var(--accent); }
@@ -630,8 +681,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 
 .pill { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; border-radius: 3px; padding: 2px 7px; }
-.pill-draft { background: #fdf1ea; color: var(--accent); border: 1px solid var(--accent-line); }
-.pill-live { background: #eaf6ef; color: #2e7d53; border: 1px solid #cce7d8; }
+.pill-draft { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line); }
+.pill-live { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th { text-align: left; color: var(--soft); font-weight: 600; font-size: 12px;
@@ -651,7 +702,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   border-top: 1px solid var(--line); }
 .steps li:first-child { border-top: 0; }
 .steps li::before { content: counter(s); position: absolute; left: 0; top: 11px;
-  width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--white);
+  width: 24px; height: 24px; border-radius: 50%; background: var(--btn); color: #fff;
   font-size: 12.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .bullets { list-style: none; }
 .bullets li { position: relative; padding: 7px 0 7px 16px; }
@@ -702,7 +753,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .mg-name { display: block; font-size: 16px; font-weight: 700; color: var(--head);
   line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 a.mg-name:hover { color: var(--accent); text-decoration: none; }
-.mg-state { font-size: 12.5px; color: #2e7d53; margin-top: 3px; }
+.mg-state { font-size: 12.5px; color: var(--ok); margin-top: 3px; }
 .mg-state.draft { color: var(--accent); }
 .mg-when { font-size: 12.5px; color: var(--soft); margin-top: 1px; }
 .mg-acts { display: flex; align-items: center; gap: 14px; justify-content: flex-end;
@@ -713,18 +764,89 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 .linkbtn { background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12.5px;
   color: var(--soft); cursor: pointer; text-decoration: none; }
 .linkbtn:hover { color: var(--accent); text-decoration: underline; }
-.linkbtn.danger:hover { color: #c0392b; }
+.linkbtn.danger:hover { color: var(--bad); }
 .linkbtn[disabled] { opacity: .5; cursor: default; }
 
 .mg-empty { padding: 26px 2px 30px; }
 .mg-empty p { font-size: 14.5px; color: var(--head); }
 .mg-empty p.muted { font-size: 13.5px; color: var(--soft); margin-top: 4px; }
 
-.mg-settings { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line); }
-.mg-settings h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--soft); margin-bottom: 10px; }
-.switch { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px;
-  color: var(--head); cursor: pointer; }
+/* ---------- settings ----------
+   Structure borrowed from a settings page that holds a lot: the sections down the left,
+   the one you chose at the right, and every setting a row - what it is and why at the
+   left, the thing you press at the right. */
+
+.set-grid { margin-top: 10px; }
+.set-out { margin: 8px 0 18px; font-size: 14.5px; display: flex; align-items: center;
+  gap: 12px; flex-wrap: wrap; }
+.set-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.set-rows { margin-top: 4px; }
+.set-row { display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap; min-height: 64px; padding: 14px 0;
+  border-top: 1px solid var(--line); }
+.set-row:first-child { border-top: 0; }
+/* a setting whose control needs the whole width: the words above it, not beside it */
+.set-row--block { display: block; }
+.set-row--block .set-label { margin-bottom: 14px; }
+.set-label { min-width: 0; flex: 1 1 260px; }
+.set-name { display: block; font-size: 15px; font-weight: 600; color: var(--head); }
+.set-why { display: block; font-size: 13px; color: var(--soft); margin-top: 3px;
+  max-width: 64ch; line-height: 1.45; }
+.set-ctl { flex: none; display: flex; align-items: center; gap: 10px; }
+.set-row .msg { flex: 1 1 100%; margin-top: 2px; }
+.set-row .msg:empty { display: none; }
+.set-note { font-size: 13px; color: var(--soft); margin-top: 12px; }
+
+.set-head { display: flex; align-items: center; gap: 18px; padding: 10px 0 20px; }
+.set-av { width: 72px; height: 72px; border-radius: 50%; background: var(--strip);
+  object-fit: cover; flex: none; }
+.set-nameline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.set-bigname { font-size: 21px; font-weight: 700; color: var(--head); line-height: 1.2; }
+.set-at { font-size: 13.5px; margin-top: 2px; }
+.set-at a { color: var(--soft); }
+.set-at a:hover { color: var(--accent); }
+.set-joined { font-size: 13px; color: var(--soft); margin-top: 3px; }
+
+/* the three ways the site can look, each a little drawn page */
+.theme-pick { display: flex; gap: 18px; flex-wrap: wrap; }
+.theme-card { flex: 1 1 200px; max-width: 260px; cursor: pointer; display: block; }
+.theme-card input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tp { display: flex; flex-wrap: wrap; gap: 7px; align-content: flex-start;
+  width: 100%; aspect-ratio: 16 / 10; padding: 9px; border-radius: 10px;
+  border: 2px solid var(--line); }
+.tp-bar { width: 100%; height: 14px; border-radius: 4px; }
+.tp-tile { flex: 1 1 0; height: 30px; border-radius: 5px; }
+/* fixed colours: these show what you would get, not what you have */
+.tp-light { background: #fcfcfc; }
+.tp-light .tp-bar { background: #c2410c; }
+.tp-light .tp-tile { background: #e3e5ea; }
+.tp-dark { background: #15171c; }
+.tp-dark .tp-bar { background: #9a330a; }
+.tp-dark .tp-tile { background: #333844; }
+.tp-auto { background: linear-gradient(to right, #fcfcfc 50%, #15171c 50%); }
+.tp-auto .tp-bar { background: linear-gradient(to right, #c2410c 50%, #9a330a 50%); }
+.tp-auto .tp-tile:nth-of-type(2) { background: #e3e5ea; }
+.tp-auto .tp-tile:nth-of-type(3) { background: #333844; }
+.theme-card:hover .tp { border-color: var(--accent-edge); }
+.theme-card input:checked ~ .tp { border-color: var(--accent); }
+.theme-card input:focus-visible ~ .tp { outline: 2px solid var(--accent); outline-offset: 3px; }
+.theme-name { display: flex; align-items: center; gap: 6px; margin-top: 9px;
+  font-size: 14.5px; font-weight: 600; color: var(--head); }
+.theme-name .tick { display: none; color: var(--accent); }
+.theme-card input:checked ~ .theme-name { color: var(--accent); }
+.theme-card input:checked ~ .theme-name .tick { display: flex; }
+
+/* a real switch, not a tick box */
+.sw { display: inline-flex; align-items: center; cursor: pointer; }
+.sw input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sw-track { display: block; position: relative; width: 46px; height: 26px;
+  border-radius: 13px; background: var(--line); transition: background .15s ease; }
+.sw-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+  transition: transform .15s ease; }
+.sw input:checked + .sw-track { background: #1a9a52; }
+.sw input:checked + .sw-track .sw-knob { transform: translateX(20px); }
+.sw input:focus-visible + .sw-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .fold { border-top: 1px solid var(--line); padding: 12px 0; }
 .fold summary { cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--head);
@@ -789,7 +911,7 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
   .burger { display: flex; }
   .bar-links {
     display: none; position: absolute; top: 60px; left: 0; right: 0;
-    background: var(--accent); flex-direction: column; align-items: stretch; gap: 0;
+    background: var(--bar); flex-direction: column; align-items: stretch; gap: 0;
     padding: 4px 0; box-shadow: 0 3px 8px rgba(0, 0, 0, .2);
   }
   .bar-links.open { display: flex; }
@@ -822,6 +944,9 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
   .mg-acts { grid-column: 1 / -1; justify-content: flex-start; gap: 12px; }
   .page-head h1 { font-size: 22px; }
   .page-title { font-size: 22px; padding-top: 20px; }
+  /* on a phone the three theme cards stack, one under the other */
+  .theme-card { flex: 1 1 100%; max-width: none; }
+  .set-row { gap: 14px; }
   .page-head .btn { margin-left: auto; }
 
   /* a finger scrolls a row, so the round ends are not needed and not in the way */
@@ -856,8 +981,8 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 .presence-line.online .dot { background: #3b82d6; }
 
 .menu .badge { margin-left: auto; }
-.badge { display: inline-block; margin-left: 8px; background: var(--accent);
-  color: var(--white); border-radius: 9px; font-size: 10.5px; font-weight: 700;
+.badge { display: inline-block; margin-left: 8px; background: var(--btn);
+  color: #fff; border-radius: 9px; font-size: 10.5px; font-weight: 700;
   padding: 1px 7px; vertical-align: 1px; }
 
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));

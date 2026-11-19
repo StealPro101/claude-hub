@@ -1862,7 +1862,7 @@ async function testHeaders() {
     moved.indexOf('https://hub.sp101.workers.dev') > 0 && moved.indexOf('MOVED') > 0);
 
   for (const p of ['/players.html', '/play.html', '/join.html', '/rules.html', '/admin.html',
-    '/mygames.html', '/charts.html']) {
+    '/mygames.html', '/charts.html', '/settings.html']) {
     const r = await call(env, p);
     eq('page served: ' + p, r.res.status, 200);
   }

@@ -46,8 +46,6 @@
     }
     Hub.beat(null);
     Hub.show('signedIn', true);
-    var member = Hub.memberOf(d.members, me.login);
-    document.getElementById('showMe').checked = !(member && member.hidePresence);
     HubPrompt.mount('prompt', 'copy', 'copyMsg');
     fillCategories(d);
     cropper = Cover.make({
@@ -521,14 +519,6 @@
       } else {
         say('fMsg', res.error, true);
       }
-    });
-  });
-
-  document.getElementById('showMe').addEventListener('change', function (ev) {
-    Hub.post('/api/me/presence', { show: ev.target.checked }).then(function (r) {
-      say('setMsg', r.ok
-        ? (r.show ? 'Others can see when you are online.' : 'You are invisible now.')
-        : (r.error || 'that did not work'), !r.ok);
     });
   });
 }());
