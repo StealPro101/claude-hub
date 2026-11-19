@@ -40,7 +40,10 @@ const HUB_CSP = [
   "object-src 'none'"
 ].join('; ');
 
-const PAGE_FOR = { '/': '/index.html', '/join': '/join.html', '/admin': '/admin.html' };
+const PAGE_FOR = {
+  '/': '/index.html', '/join': '/join.html', '/admin': '/admin.html',
+  '/charts': '/charts.html', '/settings': '/settings.html'
+};
 
 /* ---------- tiny per-IP rate limit, per isolate ---------- */
 

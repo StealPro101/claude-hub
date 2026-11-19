@@ -632,14 +632,22 @@ var Hub = (function () {
 
   /* ---------- a game thumbnail ---------- */
 
+  /*
+   * ctx: { me, onChange, rank }. A rank turns the corner into a numbered badge - that
+   * is what a chart row is - and the Draft/Pick flag moves to the bottom so the two
+   * never sit on top of each other.
+   */
   function thumb(game, members, ctx) {
+    var rank = ctx && ctx.rank ? Number(ctx.rank) : 0;
     var wrap = el('div', 'thumb');
     var shot = el('a', 'shot');
     shot.href = '/play.html?g=' + encodeURIComponent(game.id);
     shot.setAttribute('aria-label', game.title || 'Untitled');
     coverInto(shot, game);
-    if (game.status === 'draft') shot.appendChild(el('span', 'flag', 'Draft'));
-    else if (game.featured) shot.appendChild(el('span', 'flag', 'Pick'));
+    var flagCls = 'flag' + (rank ? ' flag--low' : '');
+    if (game.status === 'draft') shot.appendChild(el('span', flagCls, 'Draft'));
+    else if (game.featured) shot.appendChild(el('span', flagCls, 'Pick'));
+    if (rank) shot.appendChild(el('span', 'rank', String(rank)));
     wrap.appendChild(shot);
     var star = cornerStar(game, ctx);
     if (star) {
