@@ -221,18 +221,81 @@
     acts.appendChild(report);
     info.appendChild(acts);
 
+    /* ---- how long this game has been played ----
+     *
+     * A signed-in member's own time is the server's: it is counted from the beats that
+     * are going out anyway, and it follows them from one computer to the next. Signed
+     * out there is no account to keep it on, so it is this browser's own business - the
+     * way "Recently played" is - counted here while the game is open and the tab is
+     * being looked at, and never sent anywhere.
+     */
+    var TIME_KEY = 'hubTime';
+    var TICK = 15000;
+    var ticker = null;
+    var since = 0;
+
+    function localTimes() {
+      try {
+        var raw = JSON.parse(Hub.lsGet(TIME_KEY) || '{}');
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+        return raw;
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function localSeconds() {
+      return Math.max(0, Math.floor(Number(localTimes()[game.id]) || 0));
+    }
+
+    /* put the stretch since the last count away and start a new one; a blocked store
+       simply never remembers anything, and the cell says 0 min */
+    function keepLocal() {
+      if (!since) return;
+      var at = Date.now();
+      var span = Math.floor((at - since) / 1000);
+      if (span < 1) return;
+      var all = localTimes();
+      all[game.id] = localSeconds() + span;
+      since = at;
+      Hub.lsSet(TIME_KEY, JSON.stringify(all));
+    }
+
+    function countHere(on) {
+      if (me) return;
+      if (on && document.visibilityState !== 'visible') on = false;
+      if (on) {
+        if (!since) since = Date.now();
+        if (!ticker) ticker = setInterval(keepLocal, TICK);
+        return;
+      }
+      keepLocal();
+      since = 0;
+      if (ticker) {
+        clearInterval(ticker);
+        ticker = null;
+      }
+    }
+
+    function mySeconds(g) {
+      return me ? Math.max(0, Math.floor(Number(g.myTime) || 0)) : localSeconds();
+    }
+
     /* ---- the numbers ---- */
     function drawCounts(g) {
       Hub.clear(counts);
       [
         ['Playing now', Hub.compact(g.active || 0)],
         ['Visits', Hub.compact(g.visits || 0)],
+        ['Your time', Hub.duration(mySeconds(g)), true],
+        ['Total time', Hub.duration(g.playTime || 0), true],
         ['Updated', Hub.niceDate(g.updated) || 'recently'],
         ['Category', g.category || 'freestyle']
       ].forEach(function (pair) {
         var cell = Hub.el('div');
         cell.appendChild(Hub.el('div', 'k', pair[0]));
-        cell.appendChild(Hub.el('div', 'n', pair[1]));
+        /* "under 1 min" is a sentence, not a name: it keeps its small letters */
+        cell.appendChild(Hub.el('div', pair[2] ? 'n plain' : 'n', pair[1]));
         counts.appendChild(cell);
       });
       Hub.clear(nowLine);
@@ -354,8 +417,9 @@
       try {
         frame.focus();
       } catch (e) { /* the first click in the game focuses it */ }
-      /* signed out, "recently played" is this browser's own business */
+      /* signed out, "recently played" and "your time" are this browser's own business */
       if (!me) Hub.noteRecent(game.id);
+      countHere(true);
       /* say where we are first, then count the visit */
       beat.where(game.id)
         .then(function () { return Hub.post('/api/presence/visit', { game: game.id }); })
@@ -373,6 +437,7 @@
       document.documentElement.classList.remove('in-game');
       askLeave(false);
       play.focus();
+      countHere(false);
       beat.where(null)
         .then(function () { return Hub.data(true); })
         .then(function (fresh) {
@@ -380,10 +445,13 @@
           if (g2) {
             game.active = g2.active;
             game.visits = g2.visits;
-            drawCounts(game);
+            /* the beat above closed the session, so these have just moved */
+            game.playTime = g2.playTime;
+            game.myTime = g2.myTime;
           }
+          drawCounts(game);
         })
-        .catch(function () { /* old numbers are fine */ });
+        .catch(function () { drawCounts(game); });
     }
 
     /* Leave goes through the history entry Play made, so Back and Leave are one path */
@@ -411,6 +479,13 @@
       if (!inGame || ev.key !== 'Escape') return;
       askLeave(ask.classList.contains('off'));
     });
+
+    /* time off this browser's own clock only counts while somebody is looking at it */
+    document.addEventListener('visibilitychange', function () {
+      countHere(inGame && document.visibilityState === 'visible');
+    });
+    /* closing the tab mid-game: the last stretch is kept before the page goes */
+    window.addEventListener('pagehide', function () { countHere(false); });
 
     /* joined from somebody's card: straight in, now that everything is wired */
     if (joinWanted && joinWanted === game.id) enter();

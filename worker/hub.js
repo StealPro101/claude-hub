@@ -672,6 +672,9 @@ export function publicGame(g, favs) {
     favorite: Boolean(favs && favs.has(String(g.id).toLowerCase())),
     active: 0,
     visits: 0,
+    /* seconds: everybody's play time, and - for the person asking only - their own */
+    playTime: 0,
+    myTime: 0,
     cover: coverUrl(g.house ? 'house' : String(Number(g.ownerId)), g.repo, g.cover)
   };
 }
@@ -719,9 +722,20 @@ export async function hubPayload(env, store, session) {
   const games = onShow.concat(forMe).map((g) => publicGame(g, favs))
     .concat(house.map((g) => publicGame(g, favs)));
 
+  /*
+   * Play time. The game's own total is public - it is about the game. The other number
+   * is the asker's own, asked for with their id and handed to nobody else: a member who
+   * is signed out, or anybody asking about somebody else, gets zero. index.js only ever
+   * caches the signed-out payload, where every myTime is 0, so the cache cannot carry
+   * one person's time to another.
+   */
+  const spent = snap.time && typeof snap.time === 'object' ? snap.time : {};
+  const mineSpent = snap.myTime && typeof snap.myTime === 'object' ? snap.myTime : {};
   for (const g of games) {
     g.active = Number(snap.active[g.id]) || 0;
     g.visits = Number(snap.visits[g.id]) || 0;
+    g.playTime = Math.max(0, Math.floor((Number(spent[g.id]) || 0) / 1000));
+    g.myTime = Math.max(0, Math.floor((Number(mineSpent[g.id]) || 0) / 1000));
   }
 
   /*

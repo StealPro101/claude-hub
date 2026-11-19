@@ -324,15 +324,26 @@ async function handle(request, env, ctx) {
       const res = await presence.visit(game, member ? String(member.id) : 'ip:' + ip);
       return json({ ok: true, counted: Boolean(res && res.counted) });
     }
+    /*
+     * Whose own play time this beat belongs to. A member who switched presence off is
+     * beaten as a guest - counted, never named - but the time is still theirs, so it is
+     * said here separately from the row the beat writes.
+     */
+    const creditTo = member ? String(member.id) : null;
+
     if (path === '/api/presence/leave') {
-      await presence.leave(member && !member.hidePresence ? member.id : null, token);
+      await presence.leave(member && !member.hidePresence ? member.id : null, token, creditTo);
       return json({ ok: true });
     }
     if (path !== '/api/presence/beat') return errorJson(404, 'no such endpoint');
 
     /* a member who switched presence off is counted, never named */
-    if (member && !member.hidePresence) await presence.beat(member.id, null, game);
-    else await presence.beat(null, token || ('anon-' + ip.replace(/[^A-Za-z0-9]/g, '')), game);
+    if (member && !member.hidePresence) await presence.beat(member.id, null, game, creditTo);
+    else {
+      await presence.beat(
+        null, token || ('anon-' + ip.replace(/[^A-Za-z0-9]/g, '')), game, creditTo
+      );
+    }
     return json({ ok: true });
   }
 
