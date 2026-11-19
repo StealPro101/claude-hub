@@ -497,6 +497,10 @@ var Hub = (function () {
     links.setAttribute('aria-label', 'Main');
     links.appendChild(barLink('/', 'Home', active === 'home'));
     links.appendChild(barLink('/charts.html', 'Charts', active === 'charts'));
+    /* the way to put a game of your own on here: straight to "Add a game" for a member,
+       and to the way in for everybody else */
+    links.appendChild(barLink(d && !me ? '/join.html' : '/mygames.html#add', 'Create',
+      active === 'mygames'));
     links.appendChild(barLink('/players.html', 'Players', active === 'players'));
     links.appendChild(barLink('/rules.html', 'Rules', active === 'rules'));
     inner.appendChild(links);

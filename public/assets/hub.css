@@ -151,8 +151,14 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   align-items: center;
 }
 
+/*
+ * The bar reads in three parts: the places to go, spread evenly along it; one wide
+ * search in the middle; and you, on the right. The rows below run edge to edge, but a
+ * bar with everything pushed into its left corner looks unfinished on a wide screen.
+ */
 /* every button up here is a smooth pill, big enough to hit without looking */
-.bar-links { display: flex; gap: 6px; align-items: center; }
+.bar-links { display: flex; gap: 6px; align-items: center; justify-content: space-evenly;
+  flex: 1.5 1 0; min-width: 0; max-width: 1100px; }
 .bar-links a {
   display: inline-flex; align-items: center; height: 40px; padding: 0 16px;
   border-radius: 20px; font-size: 15.5px; font-weight: 600; white-space: nowrap;
@@ -161,33 +167,36 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
 .bar-links a:hover { background: rgba(255, 255, 255, .16); }
 .bar-links a.on { background: rgba(255, 255, 255, .24); }
 
-.bar-search { margin-left: auto; display: flex; align-items: center; position: relative; }
+.bar-search { flex: 1 1 0; min-width: 150px; max-width: 620px; display: flex;
+  align-items: center; position: relative; }
 .bar-search input[type=search] {
-  width: 260px;
-  height: 38px;
+  width: 100%;
+  height: 40px;
   border: 0;
-  border-radius: 19px;
-  padding: 0 38px 0 16px;
+  border-radius: 20px;
+  padding: 0 44px 0 18px;
   font: inherit;
-  font-size: 14px;
+  font-size: 14.5px;
   color: var(--head);
   background: var(--field);
 }
 .bar-search input::placeholder { color: var(--soft); }
 .bar-search button {
-  position: absolute; right: 4px; top: 4px;
+  position: absolute; right: 5px; top: 5px;
   width: 30px; height: 30px; border: 0; background: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center; color: var(--soft);
   border-radius: 50%;
 }
 .bar-search button:hover { color: var(--accent); }
 
-/* the search gives room back as the window narrows, before anything else has to */
-@media (max-width: 1180px) { .bar-search input[type=search] { width: 210px; } }
-@media (max-width: 1000px) { .bar-search input[type=search] { width: 170px; } }
-@media (max-width: 900px) { .bar-search input[type=search] { width: 140px; } }
+/* the pills give room back as the window narrows, before anything has to go */
+@media (max-width: 1180px) {
+  .bar-in { gap: 10px; }
+  .bar-links { gap: 2px; }
+  .bar-links a { padding: 0 11px; font-size: 15px; }
+}
 
-.bar-right { display: flex; align-items: center; gap: 10px; }
+.bar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* the way into Settings, for everyone */
 .bar-gear {
@@ -249,6 +258,18 @@ h1, h2, h3 { color: var(--head); font-weight: 600; line-height: 1.25; }
   width: 42px; height: 42px; border-radius: 50%; align-items: center;
   justify-content: center; transition: background .15s ease; }
 .burger:hover { background: rgba(255, 255, 255, .16); }
+
+/* five places no longer fit beside a search: they fold into the menu button */
+@media (max-width: 900px) {
+  .burger { display: flex; }
+  .bar-links {
+    display: none; position: absolute; top: 60px; left: 0; right: 0; max-width: none;
+    background: var(--bar); flex-direction: column; align-items: stretch; gap: 0;
+    padding: 4px 0; box-shadow: 0 3px 8px rgba(0, 0, 0, .2);
+  }
+  .bar-links.open { display: flex; }
+  .bar-links a { height: 48px; padding: 0 20px; font-size: 16px; border-radius: 0; }
+}
 
 /* ---------- hero / welcome ---------- */
 
@@ -512,11 +533,12 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
    is capped so the picture never grows taller than the window; the rows below it run the
    whole width, like the rows on the home page. */
 
-.gp-top { max-width: 1480px; margin: 0; }
+.gp-top { max-width: none; margin: 0; }
 .gp { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);
   gap: 24px; padding: 22px 0 0; align-items: stretch; }
+/* as wide as its column lets it be, but never so tall that Play drops off the screen */
 .gp-media { position: relative; aspect-ratio: 16 / 10; background: #15171c;
-  border-radius: 8px; overflow: hidden; }
+  border-radius: 8px; overflow: hidden; max-height: calc(100vh - 250px); min-height: 200px; }
 .gp-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gp-media .gen { position: absolute; inset: 0; container-type: inline-size; }
 .gp-media .gen span { font-size: 9cqw; }
@@ -564,7 +586,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .gp-stats .n.plain { text-transform: none; }
 
 .gp-about { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
-.gp-about--one { grid-template-columns: minmax(0, 1100px); }
+.gp-about--one { grid-template-columns: minmax(0, 1fr); }
 .gp-about .tbox { margin-bottom: 0; }
 .gp-about .tbox .body { font-size: 14.5px; line-height: 1.5; max-height: 300px; }
 .gp-about .tbox h2 { font-size: 14.5px; }
@@ -910,16 +932,11 @@ a.mg-name:hover { color: var(--accent); text-decoration: none; }
 @media (max-width: 760px) {
   .col { padding: 0 16px; }
   .lower-in { padding: 0 16px; }
-  .burger { display: flex; }
-  .bar-links {
-    display: none; position: absolute; top: 60px; left: 0; right: 0;
-    background: var(--bar); flex-direction: column; align-items: stretch; gap: 0;
-    padding: 4px 0; box-shadow: 0 3px 8px rgba(0, 0, 0, .2);
-  }
-  .bar-links.open { display: flex; }
-  .bar-links a { height: 48px; padding: 0 20px; font-size: 16px; border-radius: 0; }
-  .bar-search { margin-left: auto; }
-  .bar-search input[type=search] { width: 150px; }
+  .bar-search { flex: none; min-width: 0; margin-left: auto; }
+  .bar-search input[type=search] { width: 150px; height: 38px; padding: 0 38px 0 16px;
+    font-size: 14px; }
+  .bar-search button { right: 4px; top: 4px; }
+  .bar-right { margin-left: 0; }
   .bar-in { gap: 8px; }
   .two-up { flex-wrap: wrap; }
   .two-up > * { flex: 1 1 100%; }
