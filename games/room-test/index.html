@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Room check</title>
+<meta name="robots" content="noindex">
+<meta name="description" content="Two browsers, one room code: a plain check that the Hub's rooms relay works.">
+<!--
+  A connection check, not a game. It is not on the Hub and nothing links to it: open it
+  in two tabs (or on two devices), put the same code in both, and watch them see each
+  other. Everything it does, a real game does the same way.
+
+  It loads the library from the Hub - or from this computer's own Hub when the page is
+  opened from localhost. To point it somewhere else:  ?hub=http://127.0.0.1:8797
+  A code can come from the address too:  ?code=TEST
+-->
+<style>
+:root{
+  --bg:#f6f5f2; --card:#fff; --ink:#15150f; --soft:#5d5c54; --line:#dcdad2;
+  --ok:#1e7a46; --bad:#a22a20; --me:#1f5fd0;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#15161a; --card:#1e2026; --ink:#f0efe9; --soft:#a3a29a; --line:#333640;
+    --ok:#56c98a; --bad:#ff8f7e; --me:#7fb0ff; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.45 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;padding:14px}
+h1{font-size:19px;margin:0 0 2px}
+p.sub{margin:0 0 14px;color:var(--soft);font-size:13px}
+.wrap{max-width:860px;margin:0 auto;display:grid;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+label{font-size:12px;color:var(--soft);display:block;margin-bottom:3px}
+input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;
+  background:var(--bg);color:var(--ink);min-width:0}
+input#code{width:9ch;text-transform:uppercase;letter-spacing:.14em;font-weight:700}
+input#name{width:14ch}
+input#line{flex:1 1 14ch}
+button{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px;
+  background:var(--ink);color:var(--card);cursor:pointer}
+button.quiet{background:transparent;color:var(--ink)}
+button[disabled]{opacity:.45;cursor:default}
+.state{font-size:13px;color:var(--soft)}
+.state b{color:var(--ink)}
+.state.on b{color:var(--ok)}
+.state.off b{color:var(--bad)}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+li{display:flex;gap:8px;align-items:baseline;font-size:14px}
+li .tag{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;
+  color:var(--soft)}
+li.me .who{color:var(--me);font-weight:700}
+#log{margin:0;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;
+  max-height:40vh;overflow:auto;color:var(--ink)}
+#log div{border-top:1px dotted var(--line);padding:2px 0}
+#log div:first-child{border-top:0}
+.t{color:var(--soft)}
+.grid2{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+@media (max-width:620px){.grid2{grid-template-columns:1fr}}
+h2{font-size:13px;margin:0 0 8px;color:var(--soft);text-transform:uppercase;
+  letter-spacing:.08em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <h1>Room check</h1>
+    <p class="sub">Open this page twice, put the same code in both, press Join. If each
+      one lists the other, the Hub's rooms work.</p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="name">Name</label>
+        <input id="name" maxlength="24" value="Tab A" autocomplete="off">
+      </div>
+      <div>
+        <label for="code">Room code</label>
+        <input id="code" maxlength="12" autocomplete="off" spellcheck="false">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="fresh" class="quiet" type="button">New code</button>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="go" type="button">Join</button>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="stop" class="quiet" type="button" disabled>Leave</button>
+      </div>
+    </div>
+    <p class="state off" id="state">Not joined. <b>&mdash;</b></p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>In this room</h2>
+      <ul id="players"><li class="t">nobody yet</li></ul>
+    </div>
+    <div class="card">
+      <h2>Round trip</h2>
+      <p class="state" id="ping">Join with a second tab and press Ping.</p>
+      <div class="row">
+        <button id="pingBtn" type="button" disabled>Ping</button>
+        <button id="autoBtn" class="quiet" type="button" disabled>Ping every 2s</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Say something</h2>
+    <div class="row">
+      <input id="line" placeholder="hello from this tab" autocomplete="off">
+      <button id="send" type="button" disabled>Send</button>
+      <button id="sendOne" class="quiet" type="button" disabled>Send to first other</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What happened</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+/* The library comes from the Hub; ?hub=... points this page at a Hub on this computer. */
+(function () {
+  var hub = 'https://hub.sp101.workers.dev';
+  /* this page served from a Hub running on this computer: use that one */
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    hub = location.origin;
+  }
+  var asked = /[?&]hub=([^&]+)/.exec(location.search);
+  if (asked) {
+    var want = decodeURIComponent(asked[1]);
+    if (/^https?:\/\/[A-Za-z0-9.:_-]+$/.test(want)) hub = want.replace(/\/$/, '');
+  }
+  var s = document.createElement('script');
+  s.src = hub + '/room.js';
+  s.onerror = function () {
+    var log = document.getElementById('log');
+    log.appendChild(document.createElement('div')).textContent =
+      'could not load ' + s.src + ' - is the Hub up?';
+  };
+  document.head.appendChild(s);
+}());
+</script>
+<script>
+(function () {
+  'use strict';
+  var el = function (id) { return document.getElementById(id); };
+  var room = null;
+  var auto = null;
+  var watch = null;
+  var wasOn = false;
+  var sentAt = {};
+
+  function stamp() {
+    var d = new Date();
+    var two = function (n) { return (n < 10 ? '0' : '') + n; };
+    return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
+  }
+
+  /* textContent, never innerHTML: everything below came from another browser */
+  function log(what) {
+    var box = el('log');
+    var row = document.createElement('div');
+    var when = document.createElement('span');
+    when.className = 't';
+    when.textContent = stamp() + '  ';
+    row.appendChild(when);
+    row.appendChild(document.createTextNode(what));
+    box.insertBefore(row, box.firstChild);
+    while (box.childNodes.length > 200) box.removeChild(box.lastChild);
+  }
+
+  function state(text, how) {
+    var p = el('state');
+    p.className = 'state' + (how ? ' ' + how : '');
+    p.textContent = '';
+    p.appendChild(document.createTextNode(text + ' '));
+    var b = document.createElement('b');
+    b.textContent = room && room.connected ? (room.isHost ? 'you are the host' : 'in the room')
+      : '—';
+    p.appendChild(b);
+  }
+
+  function drawPlayers() {
+    var ul = el('players');
+    ul.textContent = '';
+    var list = room && room.players ? room.players : [];
+    if (!list.length) {
+      var none = document.createElement('li');
+      none.className = 't';
+      none.textContent = 'nobody yet';
+      ul.appendChild(none);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      var li = document.createElement('li');
+      if (list[i].id === room.me) li.className = 'me';
+      var who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = list[i].name || '(no name)';
+      li.appendChild(who);
+      if (list[i].id === room.host) {
+        var tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = 'host';
+        li.appendChild(tag);
+      }
+      if (list[i].id === room.me) {
+        var mine = document.createElement('span');
+        mine.className = 'tag';
+        mine.textContent = 'you';
+        li.appendChild(mine);
+      }
+      var id = document.createElement('span');
+      id.className = 'tag';
+      id.textContent = list[i].id;
+      li.appendChild(id);
+      ul.appendChild(li);
+    }
+  }
+
+  function buttons(on) {
+    el('go').disabled = on;
+    el('stop').disabled = !on;
+    el('send').disabled = !on;
+    el('sendOne').disabled = !on;
+    el('pingBtn').disabled = !on;
+    el('autoBtn').disabled = !on;
+    el('code').disabled = on;
+    el('name').disabled = on;
+  }
+
+  function others() {
+    var out = [];
+    var list = room && room.players ? room.players : [];
+    for (var i = 0; i < list.length; i++) if (list[i].id !== room.me) out.push(list[i]);
+    return out;
+  }
+
+  function ping() {
+    if (!room || !room.connected) return;
+    if (!others().length) {
+      el('ping').textContent = 'nobody else here to answer a ping yet.';
+      return;
+    }
+    var id = 'k' + Math.random().toString(36).slice(2, 8);
+    sentAt[id] = (window.performance && performance.now) ? performance.now() : Date.now();
+    room.send({ ping: id });
+  }
+
+  function stopAuto() {
+    if (auto) {
+      clearInterval(auto);
+      auto = null;
+    }
+    el('autoBtn').textContent = 'Ping every 2s';
+  }
+
+  el('fresh').addEventListener('click', function () {
+    el('code').value = window.HubRoom ? window.HubRoom.newCode() : '';
+  });
+
+  el('go').addEventListener('click', function () {
+    if (!window.HubRoom) {
+      log('the library is not loaded yet');
+      return;
+    }
+    var code = el('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length < 3) {
+      log('a code is 3 to 12 letters or numbers');
+      return;
+    }
+    el('code').value = code;
+    buttons(true);
+    state('Connecting...');
+    log('joining ' + code + ' as ' + el('name').value + ' (hub ' + window.HubRoom.hub + ')');
+    room = window.HubRoom.join({ code: code, name: el('name').value });
+
+    /* a dropped connection is not a close: the library comes back by itself, and a
+       game should say so while it is away (room.connected) */
+    if (watch) clearInterval(watch);
+    watch = setInterval(function () {
+      if (!room || room.connected === wasOn) return;
+      wasOn = room.connected;
+      if (!wasOn) {
+        state('Reconnecting...', 'off');
+        log('connection dropped - the library is trying again');
+      }
+    }, 400);
+
+    room.on('open', function (info) {
+      wasOn = true;
+      state('Joined.', 'on');
+      drawPlayers();
+      log('in the room. you are ' + info.me + ', host is ' + info.host +
+        ', ' + info.players.length + ' here');
+    });
+    room.on('join', function (p) {
+      drawPlayers();
+      state('Joined.', 'on');
+      log('joined: ' + p.name + ' (' + p.id + ')');
+    });
+    room.on('leave', function (p) {
+      drawPlayers();
+      log('left: ' + (p.name || p.id));
+    });
+    room.on('host', function (id) {
+      drawPlayers();
+      state('Joined.', 'on');
+      log('host is now ' + id + (room.isHost ? ' - that is you' : ''));
+    });
+    room.on('message', function (d, from) {
+      if (d && typeof d === 'object' && typeof d.ping === 'string') {
+        room.sendTo(from, { pong: d.ping });
+        log('ping from ' + from + ', answered');
+        return;
+      }
+      if (d && typeof d === 'object' && typeof d.pong === 'string') {
+        var at = sentAt[d.pong];
+        if (at) {
+          var ms = ((window.performance && performance.now) ? performance.now() : Date.now())
+            - at;
+          delete sentAt[d.pong];
+          el('ping').textContent = 'round trip ' + Math.round(ms) + ' ms (through ' + from + ')';
+          log('pong from ' + from + ': ' + Math.round(ms) + ' ms');
+        }
+        return;
+      }
+      log('message from ' + from + ': ' + JSON.stringify(d));
+    });
+    room.on('close', function (why) {
+      buttons(false);
+      stopAuto();
+      if (watch) {
+        clearInterval(watch);
+        watch = null;
+      }
+      state('Closed (' + why + ').', 'off');
+      drawPlayers();
+      log('closed: ' + why);
+    });
+  });
+
+  el('stop').addEventListener('click', function () {
+    if (room) room.leave();
+  });
+
+  el('send').addEventListener('click', function () {
+    if (!room) return;
+    var text = el('line').value || 'hello';
+    var went = room.send({ say: text });
+    log(went ? 'sent to everyone: ' + text : 'not sent (not connected)');
+    el('line').value = '';
+  });
+
+  el('sendOne').addEventListener('click', function () {
+    if (!room) return;
+    var rest = others();
+    if (!rest.length) {
+      log('nobody else to send to');
+      return;
+    }
+    var text = el('line').value || 'just for you';
+    var went = room.sendTo(rest[0].id, { say: text });
+    log(went ? 'sent to ' + rest[0].id + ': ' + text : 'not sent (not connected)');
+    el('line').value = '';
+  });
+
+  el('line').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') el('send').click();
+  });
+
+  el('pingBtn').addEventListener('click', ping);
+
+  el('autoBtn').addEventListener('click', function () {
+    if (auto) {
+      stopAuto();
+      return;
+    }
+    auto = setInterval(ping, 2000);
+    el('autoBtn').textContent = 'Stop pinging';
+    ping();
+  });
+
+  /* a code in the address, so a second tab can be opened on the same room */
+  var fromUrl = /[?&]code=([A-Za-z0-9]{3,12})/.exec(location.search);
+  el('code').value = fromUrl ? fromUrl[1].toUpperCase() : '';
+  el('name').value = 'Tab ' + String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  if (!el('code').value) {
+    window.addEventListener('load', function () {
+      if (!el('code').value && window.HubRoom) el('code').value = window.HubRoom.newCode();
+    });
+  }
+}());
+</script>
+</body>
+</html>

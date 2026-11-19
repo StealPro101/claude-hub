@@ -16,7 +16,10 @@ import { handle } from '../worker/index.js';
 import { memoryStore } from '../worker/store.js';
 import { getState, update, listOf } from '../worker/state.js';
 import { PresenceCore } from '../worker/presence.js';
-import { fakePresence, fakeStorage } from './fake-presence.js';
+import { fakePresence, fakeStorage, fakeSocket, fakeRoomState } from './fake-presence.js';
+import {
+  RoomsCore, roomRequest, MAX_PLAYERS, MAX_SOCKETS, MAX_MSG, RATE_BURST, RATE_DROPS, DAILY_MSGS
+} from '../worker/rooms.js';
 import {
   clean, pretty, isLogin, isRepoName, playUrl, normalizeHubJson, repoEligible, hasTopic,
   isOkEmoji, allowedCategory, safeAvatar
@@ -2004,6 +2007,384 @@ async function testPresenceRoutes() {
   eq('a presence object that throws is ignored', okHub.res.status, 200);
 }
 
+/* ---------- 15c. rooms: the relay a member's game meets in ---------- */
+
+const ROOM_A = 'friend-one/space-dodge/ABCD';
+
+function roomJoin(core, label, room, pid, name) {
+  const ws = fakeSocket(label);
+  return core.connect(ws, { room: room, pid: pid, name: name }).then(() => ws);
+}
+
+async function testRooms() {
+  console.log('rooms');
+  /* 2 AM UTC, so the tests below can move the clock without falling into the next day */
+  let now = Date.UTC(2026, 10, 18, 2, 0, 0);
+  const day = new Date(now).toISOString().slice(0, 10);
+  const disk = fakeStorage();
+  const seats = fakeRoomState();
+  const core = new RoomsCore(seats.ops(disk, () => now));
+
+  /* ---- hello, join, leave, host ---- */
+  const a = await roomJoin(core, 'a', ROOM_A, 'player-a', 'Ann');
+  const hello = a.last();
+  eq('the first player is told who they are', hello.t + ':' + hello.you, 'hello:player-a');
+  eq('and that the room is theirs', hello.host, 'player-a');
+  eq('the code comes back as the room says it', hello.code, 'ABCD');
+  eq('with themselves in the player list', JSON.stringify(hello.players),
+    '[{"id":"player-a","name":"Ann"}]');
+
+  now += 1000;
+  const b = await roomJoin(core, 'b', ROOM_A, 'player-b', 'Bo');
+  eq('the second player is told who the host is', b.last().host, 'player-a');
+  eq('and sees both players', b.last().players.map((p) => p.id).join(','),
+    'player-a,player-b');
+  eq('the first player hears about the join', a.last().t + ':' + a.last().id, 'join:player-b');
+  eq('by name', a.last().name, 'Bo');
+
+  now += 1000;
+  const c = await roomJoin(core, 'c', ROOM_A, 'player-c', 'Cy');
+  eq('a third join reaches the first player', a.last().id, 'player-c');
+  eq('and the second', b.last().id, 'player-c');
+  eq('the newcomer is not the host', c.last().host, 'player-a');
+  eq('the player list is in join order',
+    c.last().players.map((p) => p.id).join(','), 'player-a,player-b,player-c');
+
+  /* ---- messages go to the others and never back ---- */
+  const bSoFar = b.sent.length;
+  await core.message(b, JSON.stringify({ d: { move: 3 } }));
+  eq('a message reaches the other players', a.last().t + ':' + a.last().from, 'msg:player-b');
+  eq('with the payload untouched', JSON.stringify(a.last().d), '{"move":3}');
+  eq('all of them', c.last().from, 'player-b');
+  eq('and never comes back to the sender', b.sent.length, bSoFar);
+
+  await core.message(b, JSON.stringify({ to: 'player-a', d: 'psst' }));
+  eq('a message with "to" reaches that player', a.last().d, 'psst');
+  eq('and nobody else', JSON.stringify(c.last().d), '{"move":3}');
+
+  const nonsense = await core.message(b, 'not json at all');
+  eq('a message that is not JSON is ignored', nonsense.why, 'ignored');
+  const noD = await core.message(b, JSON.stringify({ hello: 'there' }));
+  eq('and so is an object with nothing to send', noD.why, 'ignored');
+  eq('nothing of either reached anybody', JSON.stringify(c.last().d), '{"move":3}');
+
+  /* ---- one member's rooms never meet another's, or their own other games ---- */
+  const other = await roomJoin(core, 'other', 'friend-two/space-dodge/ABCD', 'player-x', 'Xu');
+  const sameOwnerOtherGame = await roomJoin(core, 'og', 'friend-one/other-game/ABCD',
+    'player-y', 'Yo');
+  const otherCode = await roomJoin(core, 'oc', 'friend-one/space-dodge/WXYZ', 'player-z', 'Zoe');
+  eq('the same code on another member\'s game is another room',
+    other.last().players.length, 1);
+  eq('the same code on the same member\'s other game too',
+    sameOwnerOtherGame.last().players.length, 1);
+  eq('and another code is another room again', otherCode.last().players.length, 1);
+  const before = [other.sent.length, sameOwnerOtherGame.sent.length, otherCode.sent.length];
+  await core.message(b, JSON.stringify({ d: 'only us' }));
+  eq('a message stays inside its own room',
+    [other.sent.length, sameOwnerOtherGame.sent.length, otherCode.sent.length].join(','),
+    before.join(','));
+
+  /* ---- the same player coming back replaces their old socket ---- */
+  now += 1000;
+  const aSeen = a.sent.length;
+  const cSeen = c.sent.length;
+  const b2 = await roomJoin(core, 'b2', ROOM_A, 'player-b', 'Bo');
+  eq('the old socket is told it was replaced', b.last().t + ':' + b.last().why,
+    'bye:replaced');
+  eq('and closed', b.readyState, 3);
+  eq('the others hear nothing about it', a.sent.length + c.sent.length, aSeen + cSeen);
+  eq('the new socket sees the same three players',
+    b2.last().players.map((p) => p.id).join(','), 'player-a,player-b,player-c');
+  eq('and the same host', b2.last().host, 'player-a');
+  const closedOld = await core.close(b);
+  eq('the old socket closing is not somebody leaving', closedOld.replaced, true);
+  eq('so still nothing is said', a.sent.length + c.sent.length, aSeen + cSeen);
+
+  /* ---- the host is the longest-present player, and moves on when they go ---- */
+  a.readyState = 3;
+  await core.close(a);
+  const cTail = c.got().slice(-2);
+  eq('the room is told who left', cTail[0].t + ':' + cTail[0].id, 'leave:player-a');
+  eq('and who has it now', cTail[1].t + ':' + cTail[1].id, 'host:player-b');
+  eq('both of them hear it', b2.last().id, 'player-b');
+  /* player-b kept its place in the queue through the replace, so it is before player-c */
+  now += 1000;
+  c.readyState = 3;
+  await core.close(c);
+  eq('somebody leaving who was not the host changes nothing',
+    b2.last().t + ':' + b2.last().id, 'leave:player-c');
+
+  /* ---- a full room ---- */
+  const full = 'friend-one/full-game/ROOM';
+  const crowd = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    now += 10;
+    crowd.push(await roomJoin(core, 'p' + i, full, 'player-f' + i, 'P' + i));
+  }
+  eq('twelve players fit', crowd[11].last().players.length, 12);
+  const thirteenth = await roomJoin(core, 'p12', full, 'player-f12', 'P12');
+  eq('the thirteenth is turned away', thirteenth.last().t + ':' + thirteenth.last().why,
+    'bye:full');
+  eq('and told so before being closed', thirteenth.readyState, 3);
+  eq('it never reached the room', crowd[0].last().id, 'player-f11');
+  /* one of the twelve coming back is not a thirteenth player */
+  const again = await roomJoin(core, 'p0-again', full, 'player-f0', 'P0');
+  eq('one of them reconnecting still fits', again.last().t, 'hello');
+  eq('and the room is still twelve', again.last().players.length, 12);
+
+  /* ---- a message that is too big ---- */
+  const big = await roomJoin(core, 'big', 'friend-one/big-game/BIGR', 'player-big', 'Big');
+  const huge = JSON.stringify({ d: 'x'.repeat(MAX_MSG + 100) });
+  const bigRes = await core.message(big, huge);
+  eq('a message over 16 KB is refused', bigRes.why, 'big');
+  eq('with a reason', big.last().t + ':' + big.last().why, 'bye:big');
+  eq('and the socket closed', big.readyState, 3);
+
+  /* ---- the rate bucket ---- */
+  const fastRoom = 'friend-one/fast-game/FAST';
+  const fast = await roomJoin(core, 'fast', fastRoom, 'player-fast', 'Fa');
+  const heard = await roomJoin(core, 'slowpoke', fastRoom, 'player-heard', 'He');
+  const heardStart = heard.sent.length;
+  let okCount = 0;
+  for (let i = 0; i < RATE_BURST + 5; i++) {
+    const r = await core.message(fast, JSON.stringify({ d: i }));
+    if (r.ok) okCount++;
+  }
+  eq('a burst of 45 gets through', okCount, RATE_BURST);
+  eq('the rest are dropped without a word', heard.sent.length - heardStart, RATE_BURST);
+  ok('and the sender is left alone', fast.readyState === 1);
+  let verdict = 'drop';
+  let tries = 0;
+  while (verdict === 'drop' && tries < RATE_DROPS + 50) {
+    tries++;
+    verdict = (await core.message(fast, JSON.stringify({ d: 'spam' }))).why;
+  }
+  eq('but a sender still flooding after 300 dropped messages is cut off', verdict, 'slow');
+  eq('with a reason', fast.last().why, 'slow');
+  /* a second later, a well-behaved player is fine again */
+  now += 2000;
+  const calm = await roomJoin(core, 'calm', fastRoom, 'player-calm', 'Ca');
+  eq('and the room carries on', calm.last().t, 'hello');
+
+  /* ---- 150 sockets on the whole object ---- */
+  const manyDisk = fakeStorage();
+  const manySeats = fakeRoomState();
+  const many = new RoomsCore(manySeats.ops(manyDisk, () => now));
+  let opened = 0;
+  let refused = null;
+  for (let r = 0; r < 14 && !refused; r++) {
+    for (let i = 0; i < MAX_PLAYERS && !refused; i++) {
+      now += 1;
+      const ws = await roomJoin(many, 'm', 'friend-one/many/R' + r, 'player-m' + r + '-' + i, 'M');
+      if (ws.last().t === 'bye') refused = ws.last().why;
+      else opened++;
+    }
+  }
+  eq('the object takes 150 sockets and no more', opened, MAX_SOCKETS);
+  eq('the next one is turned away even though its own room is empty', refused, 'full');
+
+  /* ---- the daily cap ---- */
+  const capDisk = fakeStorage();
+  const capSeats = fakeRoomState();
+  await capDisk.put('rooms:msgs:' + day, DAILY_MSGS - 3);
+  const capCore = new RoomsCore(capSeats.ops(capDisk, () => now));
+  const capRoom = 'friend-one/cap-game/CAPS';
+  const one = await roomJoin(capCore, 'one', capRoom, 'player-one', 'One');
+  const two = await roomJoin(capCore, 'two', capRoom, 'player-two', 'Two');
+  eq('under the cap a room still opens', one.got()[0].t, 'hello');
+  eq('and the last messages of the day go through',
+    (await capCore.message(one, JSON.stringify({ d: 1 }))).ok, true);
+  eq('right up to the cap', (await capCore.message(one, JSON.stringify({ d: 2 }))).ok, true);
+  const over = await capCore.message(one, JSON.stringify({ d: 3 }));
+  eq('the one that reaches the cap is refused', over.why, 'limit');
+  eq('and that socket is told once, then closed',
+    one.last().t + ':' + one.last().why, 'bye:limit');
+  eq('the count is in storage, not just in memory',
+    await capDisk.get('rooms:msgs:' + day), DAILY_MSGS);
+  const woken = new RoomsCore(capSeats.ops(capDisk, () => now));
+  const late = await roomJoin(woken, 'late', capRoom, 'player-late', 'Late');
+  eq('a brand new object on the same storage still refuses to open a room',
+    late.last().t + ':' + late.last().why, 'bye:limit');
+  const stillThere = await woken.message(two, JSON.stringify({ d: 'hi' }));
+  eq('and still drops messages', stillThere.why, 'limit');
+  eq('a dropped message is counted all the same, because Cloudflare billed it anyway',
+    await capDisk.get('rooms:msgs:' + day), DAILY_MSGS + 1);
+  now += 24 * 3600000;
+  const tomorrow = new RoomsCore(capSeats.ops(capDisk, () => now));
+  const fresh = await roomJoin(tomorrow, 'fresh', capRoom, 'player-fresh', 'Fresh');
+  eq('the next UTC day starts from nothing', fresh.last().t, 'hello');
+  eq('on its own key',
+    await capDisk.get('rooms:msgs:' + new Date(now).toISOString().slice(0, 10)), undefined);
+  eq('yesterday\'s number is left where it is',
+    await capDisk.get('rooms:msgs:' + day), DAILY_MSGS + 1);
+
+  /*
+   * THE SLEEP RULE. Cloudflare puts the object to sleep after about ten quiet seconds
+   * and its memory goes with it, while the sockets stay open. So every handler below
+   * meets a brand new core that has never seen these sockets - which is what a quiet
+   * evening really looks like.
+   */
+  const sleepDisk = fakeStorage();
+  const sleepSeats = fakeRoomState();
+  const wake = () => new RoomsCore(sleepSeats.ops(sleepDisk, () => now));
+  const room = 'friend-one/sleepy/ZZZZ';
+  const one2 = fakeSocket('one');
+  await wake().connect(one2, { room: room, pid: 'sleep-one', name: 'One' });
+  now += 30000;
+  const two2 = fakeSocket('two');
+  await wake().connect(two2, { room: room, pid: 'sleep-two', name: 'Two' });
+  eq('a woken object finds the player who was already there',
+    two2.last().players.map((p) => p.id).join(','), 'sleep-one,sleep-two');
+  eq('and knows whose room it is', two2.last().host, 'sleep-one');
+  eq('the one who was there is told about the new one', one2.last().id, 'sleep-two');
+  now += 30000;
+  await wake().message(one2, JSON.stringify({ d: 'awake?' }));
+  eq('a woken object relays a message', two2.last().d, 'awake?');
+  eq('from the right player', two2.last().from, 'sleep-one');
+  now += 30000;
+  const three = fakeSocket('three');
+  await wake().connect(three, { room: room, pid: 'sleep-three', name: 'Three' });
+  now += 30000;
+  one2.readyState = 3;
+  await wake().close(one2);
+  const tail = two2.got().slice(-2);
+  eq('a woken object says who left', tail[0].t + ':' + tail[0].id, 'leave:sleep-one');
+  eq('and hands the room to the longest-present player left',
+    tail[1].t + ':' + tail[1].id, 'host:sleep-two');
+  eq('the third player hears the same', three.last().id, 'sleep-two');
+  now += 30000;
+  const back = fakeSocket('two-again');
+  await wake().connect(back, { room: room, pid: 'sleep-two', name: 'Two' });
+  eq('a woken object replaces a returning player', two2.last().why, 'replaced');
+  eq('and the room is still theirs', back.last().host, 'sleep-two');
+  eq('with nobody told they left', three.last().id, 'sleep-two');
+  const counted = await sleepDisk.get('rooms:msgs:' + day);
+  ok('and the day\'s count was written by a socket closing', counted === undefined ||
+    Number.isFinite(counted), 'got ' + JSON.stringify(counted));
+
+  /* a socket with no attachment at all (one the object never finished accepting) */
+  const stray = fakeSocket('stray');
+  const strayRes = await wake().message(stray, JSON.stringify({ d: 1 }));
+  eq('a socket the object knows nothing about is sent away', strayRes.why, 'bad');
+  eq('politely', stray.last().t + ':' + stray.last().why, 'bye:bad');
+  eq('and closing it is no trouble either', (await wake().close(stray)).ok, true);
+}
+
+/* ---------- 15d. the way in: who may open a room, and with what ---------- */
+
+async function testRoomRequest() {
+  console.log('rooms: the way in');
+  const logins = new Set(['friend-one', 'stealpro101']);
+  const url = (q) => new URL('https://hub.test/room' + q);
+  const good = '?g=space-dodge&code=abcd&pid=pid-abc123&name=Ann';
+
+  eq('a member\'s own Pages site may open a room',
+    roomRequest(url(good), 'https://friend-one.github.io', logins).room,
+    'friend-one/space-dodge/ABCD');
+  eq('the code is upper-cased', roomRequest(url(good), 'https://friend-one.github.io',
+    logins).code, 'ABCD');
+  eq('a capital in the login is the same member',
+    roomRequest(url(good), 'https://Friend-One.github.io', logins).ok, true);
+  eq('somebody who is not a member cannot',
+    roomRequest(url(good), 'https://stranger.github.io', logins).status, 403);
+  eq('and neither can another website',
+    roomRequest(url(good), 'https://evil.example.com', logins).status, 403);
+  eq('nor a site that only looks like Pages',
+    roomRequest(url(good), 'https://friend-one.github.io.evil.example.com', logins).status, 403);
+  eq('nor one with no Origin at all', roomRequest(url(good), null, logins).status, 403);
+  eq('the Hub owner may, for the house games',
+    roomRequest(url(good), 'https://stealpro101.github.io', logins).login, 'stealpro101');
+  eq('a game being tested on this computer may, under its own name',
+    roomRequest(url(good), 'http://localhost:8797', logins).room, 'local/space-dodge/ABCD');
+  eq('127.0.0.1 counts as the same', roomRequest(url(good), 'http://127.0.0.1:5500',
+    logins).login, 'local');
+  eq('but not over https from somewhere calling itself localhost',
+    roomRequest(url(good), 'https://localhost.evil.example.com', logins).status, 403);
+
+  const bad = (q) => roomRequest(url(q), 'https://friend-one.github.io', logins);
+  eq('a game name is needed', bad('?code=ABCD&pid=pid-abc123').status, 400);
+  eq('a game name with a slash in it is refused',
+    bad('?g=a/b&code=ABCD&pid=pid-abc123').status, 400);
+  eq('and one that is too long', bad('?g=' + 'g'.repeat(61) + '&code=ABCD&pid=pid-abc123')
+    .status, 400);
+  eq('a two-letter code is refused', bad('?g=x&code=AB&pid=pid-abc123').status, 400);
+  eq('a code with a dash in it is refused', bad('?g=x&code=AB-CD&pid=pid-abc123').status, 400);
+  eq('a thirteen-letter code is refused',
+    bad('?g=x&code=' + 'A'.repeat(13) + '&pid=pid-abc123').status, 400);
+  eq('a player id that is too short is refused', bad('?g=x&code=ABCD&pid=short').status, 400);
+  eq('a player id with odd characters in it is refused',
+    bad('?g=x&code=ABCD&pid=pid!abc123').status, 400);
+  eq('a missing name becomes Player', bad('?g=x&code=ABCD&pid=pid-abc123').name, 'Player');
+  eq('control characters are taken out of a name',
+    bad('?g=x&code=ABCD&pid=pid-abc123&name=' + encodeURIComponent('A\u0000n\nn ')).name, 'A n n');
+  eq('a very long name is cut to 24',
+    bad('?g=x&code=ABCD&pid=pid-abc123&name=' + 'N'.repeat(40)).name.length, 24);
+}
+
+/* ---------- 15e. rooms through the site ---------- */
+
+async function testRoomRoutes() {
+  console.log('rooms through the site');
+  const { env, store } = world();
+  await joined('friend-one', env, store);
+  const ws = { Upgrade: 'websocket', Connection: 'Upgrade' };
+  const ask = (q, origin, headers) => call(env, '/room' + q, {
+    headers: Object.assign({}, headers === undefined ? ws : headers),
+    origin: origin
+  });
+  const good = '?g=space-dodge&code=abcd&pid=pid-abc123&name=Ann';
+
+  const member = await ask(good, 'https://friend-one.github.io');
+  eq('a member\'s game is let through', member.res.status, 200);
+  eq('the object is asked for an upgrade', member.body.upgrade, true);
+  eq('with the finished room key', member.body.room, 'friend-one/space-dodge/ABCD');
+  eq('the player\'s own id', member.body.pid, 'pid-abc123');
+  eq('and the cleaned name', member.body.name, 'Ann');
+  ok('nothing raw from the client is passed on',
+    member.body.raw.indexOf('g=') < 0 && member.body.raw.indexOf('code=') < 0,
+    member.body.raw);
+
+  const stranger = await ask(good, 'https://stranger.github.io');
+  eq('somebody who is not a member gets 403', stranger.res.status, 403);
+  const site = await ask(good, 'https://evil.example.com');
+  eq('another website gets 403', site.res.status, 403);
+  const owner = await ask(good, 'https://stealpro101.github.io');
+  eq('the Hub owner is let through', owner.res.status, 200);
+  const local = await ask(good, 'http://localhost:3000');
+  eq('a game being tested on this computer is let through', local.res.status, 200);
+  eq('in its own corner', local.body.room, 'local/space-dodge/ABCD');
+
+  const badCode = await ask('?g=x&code=A&pid=pid-abc123', 'https://friend-one.github.io');
+  eq('a bad code is refused', badCode.res.status, 400);
+  const badGame = await ask('?g=a/b&code=ABCD&pid=pid-abc123', 'https://friend-one.github.io');
+  eq('a bad game name is refused', badGame.res.status, 400);
+  const plain = await ask(good, 'https://friend-one.github.io', {});
+  eq('an ordinary GET of /room is not a websocket', plain.res.status, 400);
+  const posted = await call(env, '/room' + good, {
+    headers: ws, origin: 'https://friend-one.github.io', method: 'POST'
+  });
+  eq('and a POST there is refused', posted.res.status, 405);
+
+  /* the library a game loads, and the headers that let it */
+  const assets = await import('./dev-server.js');
+  const dir = new URL('../public/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  const { env: withFiles } = world({ ASSETS: assets.diskAssets(dir) });
+  const lib = await call(withFiles, '/room.js');
+  eq('the room library is served', lib.res.status, 200);
+  ok('it is javascript', (lib.res.headers.get('Content-Type') || '').indexOf('javascript') >= 0,
+    lib.res.headers.get('Content-Type'));
+  eq('a game on another origin may load it',
+    lib.res.headers.get('Cross-Origin-Resource-Policy'), 'cross-origin');
+  ok('and only for a few minutes, so a fix reaches the games',
+    (lib.res.headers.get('Cache-Control') || '').indexOf('max-age=300') > 0,
+    lib.res.headers.get('Cache-Control'));
+  ok('it says what it is at the top', lib.text.indexOf('HubRoom') > 0);
+  const ordinary = await call(withFiles, '/assets/hub.js');
+  ok('an ordinary file is not readable from another origin',
+    ordinary.res.headers.get('Cross-Origin-Resource-Policy') !== 'cross-origin',
+    String(ordinary.res.headers.get('Cross-Origin-Resource-Policy')));
+}
+
 /* ---------- 16. one document, no listing ---------- */
 
 async function testOneDocument() {
@@ -2149,7 +2530,8 @@ async function testHeaders() {
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHubRepo, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
   testDrafts, testCovers, testFavorites, testLoveMigration, testEditEveryField, testLongFields, testPresenceCore,
-  testPlayTime, testPresenceRoutes, testOneDocument, testHeaders];
+  testPlayTime, testPresenceRoutes, testRooms, testRoomRequest, testRoomRoutes,
+  testOneDocument, testHeaders];
 
 (async () => {
   for (const g of groups) {

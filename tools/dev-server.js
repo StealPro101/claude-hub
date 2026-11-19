@@ -14,6 +14,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileStore } from './file-store.js';
 import { fakeState, fakeFetch, fakeGitHub, fakeEnv } from './fake-github.js';
+import { fakeStorage } from './fake-presence.js';
+import { devRoomsBinding } from './dev-rooms.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -165,6 +167,9 @@ export async function startDevServer(opts) {
   const state = o.state || fakeState();
   patchFetch(state, ORIGIN);
   const env = devEnv(store, ORIGIN);
+  /* rooms need a real WebSocket, which Cloudflare does for us and node does not */
+  const rooms = devRoomsBinding(env.PRESENCE, fakeStorage());
+  env.PRESENCE = rooms;
   /* a fixture can pre-fill who is playing what, so screenshots show real dots */
   try {
     const seed = JSON.parse(process.env.HUB_SEED_PRESENCE || '[]');
@@ -179,6 +184,7 @@ export async function startDevServer(opts) {
     if (seed.length) setInterval(beat, 30000).unref();
   } catch (e) { /* no seeded presence */ }
   const worker = await import('../worker/index.js');
+  const gamesDisk = diskAssets(path.join(root, 'games'));
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -194,6 +200,18 @@ export async function startDevServer(opts) {
         await send(res, r);
         return;
       }
+      /*
+       * On the real site the house games are served by GitHub Pages and the Worker
+       * 404s /games/ on purpose. Offline there is no Pages, so they come straight off
+       * disk here - which is also what lets the rooms check page run on a localhost
+       * origin, the same way a member's game runs on theirs.
+       */
+      if (url.pathname.startsWith('/games/')) {
+        await send(res, await gamesDisk.fetch(
+          new Request(ORIGIN + url.pathname.slice('/games'.length))
+        ));
+        return;
+      }
       const out = await worker.handle(request, env, { waitUntil() {} });
       await send(res, out);
     } catch (e) {
@@ -202,8 +220,45 @@ export async function startDevServer(opts) {
     }
   });
 
+  /*
+   * A WebSocket upgrade. The Worker is asked first, exactly as on Cloudflare: it checks
+   * the origin and the parameters and fetches the object, and the object's side (in
+   * dev-rooms.js) picks up the raw socket that is waiting here. Anything the Worker
+   * turns down is answered as plain HTTP and the socket is closed.
+   */
+  server.on('upgrade', async (req, socket) => {
+    try {
+      if ((req.headers.upgrade || '').toLowerCase() !== 'websocket') {
+        socket.destroy();
+        return;
+      }
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === 'string') headers.set(k, v);
+      }
+      const request = new Request(ORIGIN + req.url, { method: 'GET', headers: headers });
+      rooms.waiting.raw = socket;
+      rooms.waiting.key = req.headers['sec-websocket-key'] || '';
+      rooms.waiting.taken = false;
+      const out = await worker.handle(request, env, { waitUntil() {} });
+      if (!rooms.waiting.taken) {
+        const body = await out.text();
+        socket.write('HTTP/1.1 ' + out.status + ' no\r\nConnection: close\r\n' +
+          'Content-Type: text/plain\r\nContent-Length: ' + Buffer.byteLength(body) +
+          '\r\n\r\n' + body);
+        socket.end();
+      }
+    } catch (e) {
+      try {
+        socket.destroy();
+      } catch (e2) { /* it was already gone */ }
+    } finally {
+      rooms.waiting.raw = null;
+    }
+  });
+
   await new Promise((done) => server.listen(PORT, HOST, done));
-  return { server, store, state, env, origin: ORIGIN };
+  return { server, store, state, env, rooms, origin: ORIGIN };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

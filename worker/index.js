@@ -15,12 +15,14 @@ import {
 import { kvStore } from './store.js';
 import { getState, update, gameId as keyFor } from './state.js';
 import { PresenceCore, presenceClient } from './presence.js';
+import { RoomsCore, roomRequest } from './rooms.js';
 import { makeGitHub, makeBudget } from './github.js';
 import {
   hubPayload, getSettings, getMember, isAdminId, addGame, removeGame, refresh,
   gamesOfMember, MAX_GAMES_PER_MEMBER, topicOf, setGameMeta, setGameStatus, maySee,
   coverAllowance, putCover, houseGamesWithEdits, addLog, allowance, setFavorite, reportGame,
-  FAVORITES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames, isHubRepo, storeSweeper
+  FAVORITES_PER_HOUR, REPORTS_PER_DAY, PUBLISHED, DRAFT, houseGames, isHubRepo, storeSweeper,
+  houseOwner
 } from './hub.js';
 import { readSession, handleLogin, handleCallback, handleLogout } from './auth.js';
 import { isAdmin, adminState, handleAdmin } from './admin.js';
@@ -128,6 +130,59 @@ async function handle(request, env, ctx) {
   const path = url.pathname.replace(/\/{2,}/g, '/');
   const method = request.method.toUpperCase();
   const ip = clientIp(request);
+
+  /*
+   * ROOMS. This is first, and its answer goes back exactly as the object gave it: a
+   * WebSocket upgrade is a 101 with a live socket hanging off it, and rebuilding that
+   * response (as withSecurity does) would throw the socket away.
+   *
+   * Everything the client asked for is checked HERE and nowhere else - the object is
+   * handed the finished room key, player id and name, and reads nothing raw.
+   */
+  if (path === '/room') {
+    if (method !== 'GET') return errorJson(405, 'GET only');
+    if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') {
+      return errorJson(400, 'this address is for a game\'s websocket');
+    }
+    if (!rateLimit(ip, 'room', 30, 60000)) return errorJson(429, 'slow down a moment');
+    const binding = env.PRESENCE;
+    if (!binding) return errorJson(503, 'rooms are not switched on');
+    const store = storeOf(env);
+    const state = await getState(store);
+    /* a room may be opened from a member's own Pages site, or the Hub owner's */
+    const logins = new Set([houseOwner(env).toLowerCase()]);
+    for (const key of Object.keys(state.members)) {
+      const rec = state.members[key];
+      if (rec && typeof rec.login === 'string') logins.add(rec.login.toLowerCase());
+    }
+    const asked = roomRequest(url, request.headers.get('Origin'), logins);
+    if (!asked.ok) return errorJson(asked.status, asked.error);
+    const stub = binding.get(binding.idFromName('rooms'));
+    /* the same request, with a URL that carries only what came back from the check */
+    const inside = 'https://rooms.invalid/join?room=' + encodeURIComponent(asked.room) +
+      '&pid=' + encodeURIComponent(asked.pid) + '&name=' + encodeURIComponent(asked.name);
+    return stub.fetch(new Request(inside, request));
+  }
+
+  /*
+   * The little library a member's game loads from here. It is the one file on the Hub
+   * meant for another origin: a <script src> on https://<login>.github.io needs it to
+   * be readable cross-origin, and a short cache means a fix reaches the games in
+   * minutes instead of a day.
+   */
+  if ((method === 'GET' || method === 'HEAD') && path === '/room.js') {
+    if (!env.ASSETS) return new Response('no assets bound', { status: 500 });
+    const res = await env.ASSETS.fetch(
+      new Request(new URL('/room.js', url.origin).toString(), { method: 'GET' })
+    );
+    const h = new Headers(res.headers);
+    h.set('Content-Type', 'text/javascript; charset=utf-8');
+    h.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    h.set('Cache-Control', 'public, max-age=300');
+    h.set('X-Content-Type-Options', 'nosniff');
+    h.set('Referrer-Policy', 'no-referrer');
+    return new Response(res.body, { status: res.status, headers: h });
+  }
 
   if (method !== 'GET' && method !== 'HEAD' && method !== 'POST') {
     return errorJson(405, 'method not allowed');
@@ -525,16 +580,48 @@ export default {
 /*
  * The Durable Object. One instance ("hub") keeps who is here and how many times each
  * game has been opened - things that change every few seconds and would otherwise eat
- * the KV write budget in an evening. All the thinking is in PresenceCore so it can be
- * tested on its own; this is only the wrapper Cloudflare asks for.
+ * the KV write budget in an evening. A second instance ("rooms") relays the members'
+ * multiplayer games. Same class, two instances, no new migration.
+ *
+ * All the thinking is in PresenceCore and RoomsCore so both can be tested on their own;
+ * this is only the wrapper Cloudflare asks for.
  */
 export class Presence {
   constructor(state, env) {
     this.state = state;
     this.core = new PresenceCore(state && state.storage, () => Date.now());
+    /* built on the first socket, never before: the "hub" instance never needs it */
+    this.rooms = null;
+  }
+
+  /* A cache, nothing more: a brand new core on the same storage and the same sockets
+     behaves the same, which is exactly what every wake-up gives it. */
+  roomsCore() {
+    if (!this.rooms) {
+      const state = this.state;
+      this.rooms = new RoomsCore({
+        storage: state && state.storage,
+        now: () => Date.now(),
+        /* the Hibernation API: ws.accept() would keep this object billed and awake for
+           as long as the socket is open */
+        accept: (ws, tags) => state.acceptWebSocket(ws, tags),
+        sockets: (tag) => (tag === undefined ? state.getWebSockets() : state.getWebSockets(tag))
+      });
+    }
+    return this.rooms;
   }
 
   async fetch(request) {
+    if ((request.headers.get('Upgrade') || '').toLowerCase() === 'websocket') {
+      const url = new URL(request.url);
+      const pair = new WebSocketPair();
+      await this.roomsCore().connect(pair[1], {
+        room: url.searchParams.get('room') || '',
+        pid: url.searchParams.get('pid') || '',
+        name: url.searchParams.get('name') || ''
+      });
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
     let body = {};
     try {
       body = await request.json();
@@ -545,6 +632,20 @@ export class Presence {
     return new Response(JSON.stringify(out || { ok: false }), {
       headers: { 'Content-Type': 'application/json' }
     });
+  }
+
+  /* The hibernation handlers. They are called on a freshly built object as often as not,
+     which is why nothing a room needs is kept in memory. */
+  async webSocketMessage(ws, message) {
+    await this.roomsCore().message(ws, message);
+  }
+
+  async webSocketClose(ws, code, reason, wasClean) {
+    await this.roomsCore().close(ws, code, reason, wasClean);
+  }
+
+  async webSocketError(ws, err) {
+    await this.roomsCore().close(ws, 1011, 'error', false);
   }
 }
 
