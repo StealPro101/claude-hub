@@ -1617,6 +1617,220 @@ async function testPresenceCore() {
   eq('and allowed again in the next window', core.rate('love:9', 3, 60000).ok, true);
 }
 
+/* ---------- 15b. how long a game has been played ---------- */
+
+async function testPlayTime() {
+  console.log('play time');
+  const GAME = 'friend-one/game-a';
+  let now = 5000000;
+  /* every claim below starts from an empty object and a clock a test can move */
+  const fresh = () => {
+    now = 5000000;
+    return new PresenceCore(fakeStorage(), () => now);
+  };
+
+  /* the stretch between two beats in a game IS the play time */
+  let core = fresh();
+  await core.beat('7001', null, GAME);
+  now += 45000;
+  await core.beat('7001', null, GAME);
+  let snap = await core.snapshot('7001');
+  eq('a beat 45 seconds after the last one is 45 seconds of play', snap.time[GAME], 45000);
+  eq('and the same 45 seconds are on that member\'s own count', snap.myTime[GAME], 45000);
+  now += 30000;
+  await core.beat('7001', null, GAME);
+  eq('the next stretch adds to it', (await core.snapshot('7001')).time[GAME], 75000);
+
+  /* a gap longer than the 90 seconds that makes somebody "gone" is not play at all */
+  core = fresh();
+  await core.beat('7001', null, GAME);
+  now += 91000;
+  await core.beat('7001', null, GAME);
+  snap = await core.snapshot('7001');
+  eq('a gap over 90 seconds is a hidden or closed tab, and counts nothing',
+    snap.time[GAME] || 0, 0);
+  eq('so nobody is credited for it', Object.keys(snap.myTime).length, 0);
+
+  /* being on the site is not being in a game */
+  core = fresh();
+  await core.beat('7002', null, null);
+  now += 45000;
+  await core.beat('7002', null, null);
+  snap = await core.snapshot('7002');
+  eq('beats from somebody who is in no game credit nothing', Object.keys(snap.time).length, 0);
+  eq('and nothing of their own either', Object.keys(snap.myTime).length, 0);
+
+  /* leaving counts the tail: the last stretch is as real as the ones before it */
+  core = fresh();
+  await core.beat('7001', null, GAME);
+  now += 20000;
+  await core.leave('7001', null);
+  snap = await core.snapshot('7001');
+  eq('leaving credits the stretch since the last beat', snap.time[GAME], 20000);
+  eq('to the member who left', snap.myTime[GAME], 20000);
+  now += 20000;
+  await core.leave('7001', null);
+  eq('and leaving again, with no row left, credits nothing',
+    (await core.snapshot('7001')).time[GAME], 20000);
+
+  /* loading another page of the site rewrites the row's clock - the time owed to it
+     has to be taken first, or every page view would wipe out a minute */
+  core = fresh();
+  await core.beat('7001', null, GAME);
+  now += 30000;
+  core.touch('7001');
+  now += 30000;
+  await core.leave('7001', null);
+  eq('a page load in between does not lose the time before it',
+    (await core.snapshot('7001')).time[GAME], 60000);
+
+  /* two tabs of one member share one row, so one minute is one minute */
+  core = fresh();
+  await core.beat('7001', null, GAME);
+  await core.beat('7001', null, GAME);
+  now += 45000;
+  await core.beat('7001', null, GAME);
+  await core.beat('7001', null, GAME);
+  now += 45000;
+  await core.beat('7001', null, GAME);
+  await core.beat('7001', null, GAME);
+  snap = await core.snapshot('7001');
+  eq('two tabs of one member do not count the same 90 seconds twice', snap.time[GAME], 90000);
+  eq('and their own count says the same', snap.myTime[GAME], 90000);
+
+  /* a guest counts for the game and for nobody */
+  core = fresh();
+  await core.beat(null, 'tok-guest', GAME);
+  now += 45000;
+  await core.beat(null, 'tok-guest', GAME);
+  snap = await core.snapshot('tok-guest');
+  eq('a signed-out player adds to the game\'s total', snap.time[GAME], 45000);
+  eq('but to nobody\'s own time', Object.keys(snap.myTime).length, 0);
+  ok('and no token is kept as if it were a person',
+    JSON.stringify([...core.myTime.keys()]).indexOf('tok-guest') < 0);
+
+  /* a member who switched presence off beats as a guest - their time is still theirs */
+  core = fresh();
+  await core.beat(null, 'tok-hidden', GAME, '7003');
+  now += 60000;
+  await core.beat(null, 'tok-hidden', GAME, '7003');
+  snap = await core.snapshot('7003');
+  eq('an invisible member is credited privately', snap.myTime[GAME], 60000);
+  eq('and their play is in the game\'s total like anyone\'s', snap.time[GAME], 60000);
+  eq('nobody is handed somebody else\'s time',
+    Object.keys((await core.snapshot('7004')).myTime).length, 0);
+  eq('and asking for nobody\'s gives nothing away',
+    Object.keys((await core.snapshot()).myTime).length, 0);
+  ok('while the game\'s own total is there for everybody',
+    (await core.snapshot()).time[GAME] === 60000);
+
+  /* the counters survive the object being put to sleep */
+  core = fresh();
+  await core.beat('7001', null, GAME);
+  now += 50000;
+  await core.beat('7001', null, GAME);
+  const storage = core.storage;
+  await core.maybeSave(true);
+  const woken = new PresenceCore(storage, () => now);
+  const back = await woken.snapshot('7001');
+  eq('play time comes back after an eviction', back.time[GAME], 50000);
+  eq('including each member\'s own', back.myTime[GAME], 50000);
+  now += 10000;
+  await woken.beat('7001', null, GAME);
+  now += 10000;
+  await woken.leave('7001', null);
+  eq('and it carries on from there, not from zero',
+    (await woken.snapshot('7001')).time[GAME], 60000);
+
+  /* a storage key is only written when that key changed */
+  const quiet = new PresenceCore(fakeStorage(), () => now);
+  await quiet.load();
+  let puts = [];
+  quiet.storage.put = async (k) => { puts.push(k); };
+  await quiet.beat('7001', null, GAME);
+  now += 45000;
+  await quiet.beat('7001', null, null);
+  ok('a session that ends is written at once', puts.indexOf('time') >= 0, puts.join(','));
+  ok('and nothing else is', puts.indexOf('visits') < 0 && puts.indexOf('recent') < 0,
+    puts.join(','));
+  puts = [];
+  now += 45000;
+  await quiet.beat('7001', null, null);
+  eq('a minute with nobody playing costs no write at all', puts.length, 0);
+
+  /* ---- through the site ---- */
+  const { env, store } = world();
+  const core7001 = env.PRESENCE.core;
+  const mine = await joined('friend-one', env, store);
+  const other = await joined('friend-two', env, store);
+  await call(env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: mine });
+  await call(env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: 'Plain Game' }, cookie: mine
+  });
+  await call(env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: mine });
+  const id = 'friend-one/plain-game';
+
+  await call(env, '/api/presence/beat', { body: { game: id }, cookie: mine });
+  /* the real clock runs while the test does; making that beat look a minute old is the
+     only way to ask for a known number of seconds through the routes */
+  core7001.members.get('7001').at -= 60000;
+  await call(env, '/api/presence/beat', { body: { game: id }, cookie: mine });
+  const own = Math.round((core7001.myTime.get('7001').get(id) || 0) / 1000);
+  ok('a beat through the site credits the member it came from', own === 60, String(own));
+
+  /* the same for somebody who switched "show when I'm online" off */
+  await call(env, '/api/me/presence', { body: { show: false }, cookie: other });
+  await call(env, '/api/presence/beat', {
+    body: { game: id, token: 'guest-token-7' }, cookie: other
+  });
+  core7001.guests.get('guest-token-7').at -= 30000;
+  await call(env, '/api/presence/beat', {
+    body: { game: id, token: 'guest-token-7' }, cookie: other
+  });
+  const hiddenOwn = Math.round((core7001.myTime.get('7002').get(id) || 0) / 1000);
+  ok('a hidden member\'s own time still reaches them', hiddenOwn === 30, String(hiddenOwn));
+  ok('and they are still not named anywhere',
+    JSON.stringify((await call(env, '/api/hub')).body.members)
+      .indexOf('guest-token-7') < 0);
+
+  const hub = await call(env, '/api/hub', { cookie: mine });
+  const g = hub.body.games.find((x) => x.id === id);
+  ok('the payload tells the asker their own time', g.myTime === 60, String(g.myTime));
+  ok('and the game\'s total, which is everybody\'s together',
+    g.playTime >= 90 && g.playTime <= 91, String(g.playTime));
+  const theirs = (await call(env, '/api/hub', { cookie: other }))
+    .body.games.find((x) => x.id === id);
+  ok('somebody else is told their own time and not mine',
+    theirs.myTime === 30, String(theirs.myTime));
+  const outside = (await call(env, '/api/hub')).body.games.find((x) => x.id === id);
+  eq('a signed-out visitor has no time of their own here', outside.myTime, 0);
+  ok('but the total is public', outside.playTime >= 90, String(outside.playTime));
+  ok('and nobody else\'s time is anywhere in the payload',
+    JSON.stringify(hub.body.members).indexOf('myTime') < 0);
+
+  /*
+   * index.js keeps a five second copy of the payload. Only the signed-out one is ever
+   * kept or served, so a member's own time cannot reach anybody through it.
+   */
+  const cached = world({ HUB_NO_CACHE: '0' });
+  const c1 = await joined('friend-one', cached.env, cached.store);
+  await call(cached.env, '/api/games/add', { body: { repo: 'plain-game' }, cookie: c1 });
+  await call(cached.env, '/api/games/meta', {
+    body: { repo: 'plain-game', title: 'Plain Game' }, cookie: c1
+  });
+  await call(cached.env, '/api/games/publish', { body: { repo: 'plain-game' }, cookie: c1 });
+  cached.env.PRESENCE.core.time.set(id, 7200000);
+  cached.env.PRESENCE.core.myTime.set('7001', new Map([[id, 3600000]]));
+  const cold = (await call(cached.env, '/api/hub')).body.games.find((x) => x.id === id);
+  eq('the cached payload holds no time of anybody\'s own', cold.myTime, 0);
+  eq('only the public total', cold.playTime, 7200);
+  const warm = (await call(cached.env, '/api/hub', { cookie: c1 }))
+    .body.games.find((x) => x.id === id);
+  eq('a signed-in member is never served that cache', warm.myTime, 3600);
+  const again = (await call(cached.env, '/api/hub')).body.games.find((x) => x.id === id);
+  eq('and the next signed-out visitor still gets nobody\'s', again.myTime, 0);
+}
+
 async function testPresenceRoutes() {
   console.log('presence through the site');
   const { env, store } = world();
@@ -1889,7 +2103,7 @@ async function testHeaders() {
 const groups = [testPure, testSessions, testOauth, testInvite, testGames, testHubRepo, testRefresh,
   testBudget, testAdmin, testMisc, testOwnSecret, testSetupGate, testRenamedAccounts,
   testDrafts, testCovers, testFavorites, testLoveMigration, testEditEveryField, testLongFields, testPresenceCore,
-  testPresenceRoutes, testOneDocument, testHeaders];
+  testPlayTime, testPresenceRoutes, testOneDocument, testHeaders];
 
 (async () => {
   for (const g of groups) {

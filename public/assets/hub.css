@@ -554,12 +554,14 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 @media (min-width: 821px) { .gp-acts { flex-wrap: nowrap; } }
 .gp-hint { margin-top: 8px; }
 
-.gp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0;
+.gp-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0;
   margin-top: 26px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .gp-stats > div { padding: 13px 8px 14px; text-align: center; }
 .gp-stats .k { font-size: 12px; color: var(--soft); font-weight: 500; }
 .gp-stats .n { font-size: 17px; font-weight: 700; color: var(--head); margin-top: 3px;
   text-transform: capitalize; overflow-wrap: anywhere; }
+/* a number that is really a short sentence ("under 1 min") keeps its small letters */
+.gp-stats .n.plain { text-transform: none; }
 
 .gp-about { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
 .gp-about--one { grid-template-columns: minmax(0, 1100px); }

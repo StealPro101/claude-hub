@@ -222,6 +222,25 @@ var Hub = (function () {
     return cut(v / 1000000, 'M');
   }
 
+  /*
+   * How long something has been played, in words: nothing yet is "0 min", the first
+   * seconds are "under 1 min" (never "0 min" for time that really was spent), then
+   * plain minutes, then hours and minutes with no empty "0m" on the end. Past a hundred
+   * hours the hours themselves go through compact, so a game nobody can stop playing
+   * reads "1.2K h" instead of running out of its cell.
+   */
+  function duration(seconds) {
+    var s = Math.floor(Number(seconds) || 0);
+    if (s <= 0) return '0 min';
+    if (s < 60) return 'under 1 min';
+    var mins = Math.floor(s / 60);
+    if (mins < 60) return mins + ' min';
+    var hours = Math.floor(mins / 60);
+    if (hours >= 100) return compact(hours) + ' h';
+    var rest = mins - hours * 60;
+    return rest ? hours + 'h ' + rest + 'm' : hours + 'h';
+  }
+
   /* ---------- recently played ----------
    *
    * A member's list is kept by the server and is private to them. A signed-out
@@ -865,7 +884,8 @@ var Hub = (function () {
     starIcon: starIcon, favoriteToggle: toggle, paintStar: paint,
     coverInto: coverInto, coverUrl: coverUrl, playUrl: playUrl, avatarUrl: avatarUrl,
     profileUrl: profileUrl, memberOf: memberOf, ago: ago, niceDate: niceDate,
-    monthYear: monthYear, count: count, compact: compact, hashOf: hashOf, beat: beat, fail: fail,
+    monthYear: monthYear, count: count, compact: compact, duration: duration,
+    hashOf: hashOf, beat: beat, fail: fail,
     lsGet: lsGet, lsSet: lsSet
   };
 }());
